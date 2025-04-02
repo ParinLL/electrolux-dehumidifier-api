@@ -10,6 +10,7 @@ export interface ApplianceCommand {
   mode?: 'AUTO' | 'DRY' | 'QUIET';
   targetHumidity?: number;
   fanSpeedSetting?: 'HIGH' | 'MIDDLE' | 'LOW';
+  executeCommand?: 'OFF';
 }
 
 export interface ElectroluxConfig {
@@ -249,6 +250,20 @@ export class ElectroluxApi {
    */
   async setFanSpeed(speed: 'HIGH' | 'MIDDLE' | 'LOW'): Promise<void> {
     await this.sendCommand({ fanSpeedSetting: speed });
+  }
+  
+  /**
+   * Turn the appliance off
+   */
+  async turnOff(): Promise<void> {
+    await this.sendCommand({ executeCommand: 'OFF' });
+  }
+  
+  /**
+   * Turn the appliance on with AUTO mode and clean air mode ON
+   */
+  async turnOn(): Promise<void> {
+    await this.sendCommand({ mode: 'AUTO', cleanAirMode: 'ON' });
   }
   
   /**
