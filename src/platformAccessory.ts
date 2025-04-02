@@ -47,6 +47,10 @@ export class ElectroluxDehumidifierAccessory {
       .setProps({
         validValues: [this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER],
       })
+      .onSet(() => {
+        // Always accept the value but ensure it's DEHUMIDIFIER
+        return this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER;
+      })
       .onGet(this.getTargetHumidifierDehumidifierState.bind(this));
     
     this.humidifierService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
@@ -141,7 +145,7 @@ export class ElectroluxDehumidifierAccessory {
     
     this.humidifierService.updateCharacteristic(
       this.platform.Characteristic.RelativeHumidityDehumidifierThreshold,
-      this.currentState.targetHumidity,
+      this.currentState.targetHumidity < 40 ? 40 : this.currentState.targetHumidity,
     );
     
     // Update fan service
@@ -330,7 +334,8 @@ export class ElectroluxDehumidifierAccessory {
       }
     }
     
-    const targetHumidity = this.currentState.targetHumidity;
+    // Ensure the target humidity is within valid range (40-60)
+    const targetHumidity = this.currentState.targetHumidity < 40 ? 40 : this.currentState.targetHumidity;
     this.platform.log.debug('Get RelativeHumidityDehumidifierThreshold ->', targetHumidity);
     return targetHumidity;
   }

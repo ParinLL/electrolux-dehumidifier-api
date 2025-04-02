@@ -75,9 +75,15 @@ export class ElectroluxApi {
     try {
       this.log.debug('Refreshing access token');
       
+      // Add additional headers that might be required by the API
       const response = await this.axiosInstance.post<TokenResponse>(
         this.tokenRefreshUrl,
         { refreshToken: this.config.refreshToken },
+        {
+          headers: {
+            'x-api-key': this.config.apiKey,
+          },
+        },
       );
       
       this.accessToken = response.data.accessToken;
@@ -85,6 +91,7 @@ export class ElectroluxApi {
       // Update refresh token if a new one was provided
       if (response.data.refreshToken) {
         this.config.refreshToken = response.data.refreshToken;
+        this.log.debug('Received new refresh token');
       }
       
       // Set token expiry time (subtract 5 minutes for safety)
@@ -93,7 +100,24 @@ export class ElectroluxApi {
       
       this.log.debug(`Token refreshed, expires in ${response.data.expiresIn} seconds`);
     } catch (error) {
-      this.log.error('Failed to refresh token:', error);
+      // Log more detailed error information
+      if (axios.isAxiosError(error) && error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        this.log.error(`Token refresh failed with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+        
+        // If the refresh token is invalid or expired, we need to inform the user
+        if (error.response.status === 401) {
+          this.log.error('Your refresh token appears to be invalid or expired. Please obtain a new refresh token from the Electrolux API.');
+        }
+      } else if (axios.isAxiosError(error) && error.request) {
+        // The request was made but no response was received
+        this.log.error('No response received from token refresh request:', error.request);
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        this.log.error('Error setting up token refresh request:', error instanceof Error ? error.message : String(error));
+      }
+      
       throw new Error('Failed to refresh access token');
     }
   }
@@ -134,7 +158,11 @@ export class ElectroluxApi {
       
       return state;
     } catch (error) {
-      this.log.error('Failed to get appliance state:', error);
+      if (axios.isAxiosError(error) && error.response) {
+        this.log.error(`Failed to get appliance state with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+      } else {
+        this.log.error('Failed to get appliance state:', error instanceof Error ? error.message : String(error));
+      }
       throw new Error('Failed to get appliance state');
     }
   }
@@ -197,7 +225,11 @@ export class ElectroluxApi {
       
       this.log.debug('Command sent successfully');
     } catch (error) {
-      this.log.error('Failed to send command:', error);
+      if (axios.isAxiosError(error) && error.response) {
+        this.log.error(`Failed to send command with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+      } else {
+        this.log.error('Failed to send command:', error instanceof Error ? error.message : String(error));
+      }
       throw new Error(`Failed to send command: ${JSON.stringify(command)}`);
     }
   }
