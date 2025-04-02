@@ -1,5 +1,15 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { Logging } from 'homebridge';
+
+/**
+ * Command types that can be sent to the appliance
+ */
+export interface ApplianceCommand {
+  cleanAirMode?: 'ON' | 'OFF';
+  mode?: 'AUTO' | 'DRY' | 'QUIET';
+  targetHumidity?: number;
+  fanSpeedSetting?: 'HIGH' | 'MIDDLE' | 'LOW';
+}
 
 export interface ElectroluxConfig {
   apiKey: string;
@@ -164,7 +174,7 @@ export class ElectroluxApi {
   /**
    * Send a command to the appliance
    */
-  private async sendCommand(command: Record<string, any>): Promise<void> {
+  private async sendCommand(command: ApplianceCommand): Promise<void> {
     await this.ensureValidToken();
     
     try {
