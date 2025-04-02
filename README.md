@@ -51,9 +51,9 @@ Add the following to your Homebridge config.json:
 
 To use this plugin, you need to obtain your API key, refresh token, and appliance ID from Electrolux:
 
-1. Get your API key (x-api-key) from the Electrolux developer portal
-2. Use the refresh token from your initial authentication
-3. Find your appliance ID by making an API call to list your appliances
+1. Get your API key (x-api-key) from the [Electrolux developer portal](https://developer.electrolux.one/dashboard)
+2. Use the refresh token from your [initial authentication](https://developer.electrolux.one/documentation/reference#refreshToken)
+3. [Find your appliance ID](https://developer.electrolux.one/documentation/reference#getUserAppliances) by making an API call to list your appliances
 
 ## HomeKit Services
 
