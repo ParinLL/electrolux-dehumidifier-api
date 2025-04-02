@@ -1,14 +1,12 @@
 # Homebridge Electrolux Dehumidifier Plugin
 
-This Homebridge plugin allows you to control your Electrolux dehumidifier with HomeKit. It integrates with the Electrolux API to provide control and monitoring of your dehumidifier.
+This Homebridge plugin allows you to control your Electrolux dehumidifier with HomeKit. It integrates with the Electrolux API to provide basic control of your dehumidifier.
+
+**Note:** This plugin has only been tested on the Electrolux DEHUMIDIFIER ED2171WA model.
 
 ## Features
 
 - Control dehumidifier power (on/off)
-- Set target humidity level (40-60%, in 5% increments)
-- Control fan speed (Low, Medium, High)
-- Toggle Clean Air Mode
-- Monitor current humidity level
 - Auto-renewal of access tokens
 
 ## Installation
@@ -59,27 +57,18 @@ To use this plugin, you need to obtain your API key, refresh token, and applianc
 
 ## HomeKit Services
 
-This plugin creates the following HomeKit services:
+This plugin currently creates the following HomeKit service:
 
-1. **Dehumidifier** - Main service for controlling the dehumidifier
-   - Power on/off
-   - Target humidity setting
-   - Current humidity reading
+1. **Switch** - Basic on/off control for the dehumidifier
 
-2. **Fan** - Controls the fan speed
-   - Low, Medium, High settings
-
-3. **Switch** - Controls the Clean Air Mode
-   - On/Off toggle
-
-4. **Humidity Sensor** - Shows the current humidity level
+**Note:** While the underlying API supports additional features like humidity control, fan speed settings, and Clean Air Mode, these are not currently exposed as HomeKit services. Future updates may add these capabilities.
 
 ## Development
 
 ```bash
 # Clone the repository
-git clone https://github.com/USERNAME/homebridge-electrolux-dehumidifier.git
-cd homebridge-electrolux-dehumidifier
+git clone https://github.com/ParinLL/electrolux-dehumidifier-api.git
+cd electrolux-dehumidifier-api
 
 # Install dependencies
 npm install
