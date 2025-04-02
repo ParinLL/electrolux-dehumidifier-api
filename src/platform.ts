@@ -1,7 +1,7 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-import { ElectroluxApi, ElectroluxConfig } from './electroluxApi.js';
+import { ElectroluxApi } from './electroluxApi.js';
 
 /**
  * HomebridgePlatform
@@ -17,7 +17,7 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
   public readonly discoveredCacheUUIDs: string[] = [];
   
   // Electrolux API client
-  public readonly electroluxApi: ElectroluxApi;
+  public readonly electroluxApi!: ElectroluxApi;
   
   // Polling interval timer
   private pollingInterval?: NodeJS.Timeout;

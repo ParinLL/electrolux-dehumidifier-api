@@ -98,13 +98,8 @@ export class ElectroluxDehumidifierAccessory {
       .onSet(this.setCleanAirMode.bind(this))
       .onGet(this.getCleanAirMode.bind(this));
     
-    // Register for state updates
-    this.accessory.on('context-update', () => {
-      if (this.accessory.context.state) {
-        this.currentState = this.accessory.context.state;
-        this.updateAllCharacteristics();
-      }
-    });
+    // Set up a method to handle state updates
+    this.setupStateUpdateHandler();
     
     // Initialize state if available
     if (this.accessory.context.state) {
@@ -178,14 +173,14 @@ export class ElectroluxDehumidifierAccessory {
    */
   private getFanSpeedValue(speed: string): number {
     switch (speed) {
-      case 'LOW':
-        return 33;
-      case 'MIDDLE':
-        return 66;
-      case 'HIGH':
-        return 100;
-      default:
-        return 0;
+    case 'LOW':
+      return 33;
+    case 'MIDDLE':
+      return 66;
+    case 'HIGH':
+      return 100;
+    default:
+      return 0;
     }
   }
   
@@ -200,6 +195,25 @@ export class ElectroluxDehumidifierAccessory {
     } else {
       return 'HIGH';
     }
+  }
+  
+  /**
+   * Set up a handler for state updates
+   * This is called when the platform updates the accessory context with new state
+   */
+  private setupStateUpdateHandler() {
+    // Monitor for changes to the accessory context
+    this.platform.api.on('didFinishLaunching', () => {
+      // Check for state updates periodically
+      setInterval(() => {
+        if (this.accessory.context.state && 
+            (!this.currentState || 
+             JSON.stringify(this.accessory.context.state) !== JSON.stringify(this.currentState))) {
+          this.currentState = this.accessory.context.state;
+          this.updateAllCharacteristics();
+        }
+      }, 1000); // Check every second
+    });
   }
 
   /**
