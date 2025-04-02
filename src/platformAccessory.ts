@@ -10,7 +10,7 @@ import { ApplianceState } from './electroluxApi.js';
  */
 export class ElectroluxDehumidifierAccessory {
   // Services
-  private humidifierService: Service;
+  private switchService: Service;
   
   // Keep track of the current state
   private currentState: ApplianceState | null = null;
@@ -25,33 +25,25 @@ export class ElectroluxDehumidifierAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'Dehumidifier')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, accessory.context.device.uniqueId);
 
-    // Create the humidifier service (main service)
-    this.humidifierService = this.accessory.getService(this.platform.Service.HumidifierDehumidifier) || 
-      this.accessory.addService(this.platform.Service.HumidifierDehumidifier);
+    // Remove any existing services except for the AccessoryInformation service
+    const services = this.accessory.services.slice();
+    for (const service of services) {
+      if (service.UUID !== this.platform.Service.AccessoryInformation.UUID) {
+        this.accessory.removeService(service);
+      }
+    }
+
+    // Create a simple switch service for on/off functionality
+    this.switchService = this.accessory.getService(this.platform.Service.Switch) || 
+      this.accessory.addService(this.platform.Service.Switch);
     
     // Set the service name
-    this.humidifierService.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.displayName);
+    this.switchService.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.displayName);
     
-    // Configure the humidifier service with only on/off functionality
-    this.humidifierService.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setActive.bind(this))
-      .onGet(this.getActive.bind(this));
-    
-    this.humidifierService.getCharacteristic(this.platform.Characteristic.CurrentHumidifierDehumidifierState)
-      .onGet(this.getCurrentHumidifierDehumidifierState.bind(this));
-    
-    this.humidifierService.getCharacteristic(this.platform.Characteristic.TargetHumidifierDehumidifierState)
-      .setProps({
-        validValues: [this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER],
-      })
-      .onSet(() => {
-        // Always accept the value but ensure it's DEHUMIDIFIER
-        return this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER;
-      })
-      .onGet(this.getTargetHumidifierDehumidifierState.bind(this));
-    
-    this.humidifierService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
-      .onGet(this.getCurrentRelativeHumidity.bind(this));
+    // Configure the switch service with on/off functionality
+    this.switchService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(this.setOn.bind(this))
+      .onGet(this.getOn.bind(this));
     
     // Set up a method to handle state updates
     this.setupStateUpdateHandler();
@@ -71,27 +63,10 @@ export class ElectroluxDehumidifierAccessory {
       return;
     }
     
-    // Update humidifier service
-    this.humidifierService.updateCharacteristic(
-      this.platform.Characteristic.Active,
-      this.currentState.applianceState === 'RUNNING' ? 1 : 0,
-    );
-    
-    this.humidifierService.updateCharacteristic(
-      this.platform.Characteristic.CurrentHumidifierDehumidifierState,
-      this.currentState.applianceState === 'RUNNING' 
-        ? this.platform.Characteristic.CurrentHumidifierDehumidifierState.DEHUMIDIFYING
-        : this.platform.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE,
-    );
-    
-    this.humidifierService.updateCharacteristic(
-      this.platform.Characteristic.TargetHumidifierDehumidifierState,
-      this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER,
-    );
-    
-    this.humidifierService.updateCharacteristic(
-      this.platform.Characteristic.CurrentRelativeHumidity,
-      this.currentState.sensorHumidity,
+    // Update switch service
+    this.switchService.updateCharacteristic(
+      this.platform.Characteristic.On,
+      this.currentState.applianceState === 'RUNNING',
     );
   }
   
@@ -116,13 +91,13 @@ export class ElectroluxDehumidifierAccessory {
   }
 
   /**
-   * Handle "SET" requests for the Active characteristic
+   * Handle "SET" requests for the On characteristic
    */
-  async setActive(value: CharacteristicValue) {
-    this.platform.log.debug('Set Active ->', value);
+  async setOn(value: CharacteristicValue) {
+    this.platform.log.debug('Set On ->', value);
     
     try {
-      if (value === 1) {
+      if (value) {
         // Turn on with AUTO mode and clean air mode ON
         await this.platform.electroluxApi.turnOn();
       } else {
@@ -130,74 +105,27 @@ export class ElectroluxDehumidifierAccessory {
         await this.platform.electroluxApi.turnOff();
       }
     } catch (error) {
-      this.platform.log.error('Failed to set active state:', error);
+      this.platform.log.error('Failed to set on state:', error);
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
   }
 
   /**
-   * Handle "GET" requests for the Active characteristic
+   * Handle "GET" requests for the On characteristic
    */
-  async getActive(): Promise<CharacteristicValue> {
+  async getOn(): Promise<CharacteristicValue> {
     if (!this.currentState) {
       try {
         this.currentState = await this.platform.electroluxApi.getApplianceState();
       } catch (error) {
-        this.platform.log.error('Failed to get active state:', error);
+        this.platform.log.error('Failed to get on state:', error);
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
     }
     
-    const isActive = this.currentState.applianceState === 'RUNNING' ? 1 : 0;
-    this.platform.log.debug('Get Active ->', isActive);
-    return isActive;
-  }
-
-  /**
-   * Handle "GET" requests for the CurrentHumidifierDehumidifierState characteristic
-   */
-  async getCurrentHumidifierDehumidifierState(): Promise<CharacteristicValue> {
-    if (!this.currentState) {
-      try {
-        this.currentState = await this.platform.electroluxApi.getApplianceState();
-      } catch (error) {
-        this.platform.log.error('Failed to get current state:', error);
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-      }
-    }
-    
-    const state = this.currentState.applianceState === 'RUNNING'
-      ? this.platform.Characteristic.CurrentHumidifierDehumidifierState.DEHUMIDIFYING
-      : this.platform.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
-    
-    this.platform.log.debug('Get CurrentHumidifierDehumidifierState ->', state);
-    return state;
-  }
-
-  /**
-   * Handle "GET" requests for the TargetHumidifierDehumidifierState characteristic
-   */
-  async getTargetHumidifierDehumidifierState(): Promise<CharacteristicValue> {
-    // We only support dehumidifier mode
-    return this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER;
-  }
-
-  /**
-   * Handle "GET" requests for the CurrentRelativeHumidity characteristic
-   */
-  async getCurrentRelativeHumidity(): Promise<CharacteristicValue> {
-    if (!this.currentState) {
-      try {
-        this.currentState = await this.platform.electroluxApi.getApplianceState();
-      } catch (error) {
-        this.platform.log.error('Failed to get humidity:', error);
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-      }
-    }
-    
-    const humidity = this.currentState.sensorHumidity;
-    this.platform.log.debug('Get CurrentRelativeHumidity ->', humidity);
-    return humidity;
+    const isOn = this.currentState.applianceState === 'RUNNING';
+    this.platform.log.debug('Get On ->', isOn);
+    return isOn;
   }
 
 }
