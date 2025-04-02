@@ -3,7 +3,7 @@
   "displayName": "Electrolux Dehumidifier",
   "type": "module",
   "version": "1.0.0",
-  "private": true,
+  "private": false,
   "description": "Homebridge plugin for Electrolux dehumidifier devices",
   "author": "Homebridge User",
   "license": "Apache-2.0",
