@@ -1,148 +1,406 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
-import type { ExampleHomebridgePlatform } from './platform.js';
+import type { ElectroluxDehumidifierPlatform } from './platform.js';
+import { ApplianceState } from './electroluxApi.js';
 
 /**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
  */
-export class ExamplePlatformAccessory {
-  private service: Service;
-
-  /**
-   * These are just used to create a working example
-   * You should implement your own code to track the state of your accessory
-   */
-  private exampleStates = {
-    On: false,
-    Brightness: 100,
-  };
+export class ElectroluxDehumidifierAccessory {
+  // Services
+  private humidifierService: Service;
+  private fanService: Service;
+  private humidityService: Service;
+  private airPurifierService: Service;
+  
+  // Keep track of the current state
+  private currentState: ApplianceState | null = null;
 
   constructor(
-    private readonly platform: ExampleHomebridgePlatform,
+    private readonly platform: ElectroluxDehumidifierPlatform,
     private readonly accessory: PlatformAccessory,
   ) {
-    // set accessory information
+    // Set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Default-Manufacturer')
-      .setCharacteristic(this.platform.Characteristic.Model, 'Default-Model')
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'Default-Serial');
+      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Electrolux')
+      .setCharacteristic(this.platform.Characteristic.Model, 'Dehumidifier')
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, accessory.context.device.uniqueId);
 
-    // get the LightBulb service if it exists, otherwise create a new LightBulb service
-    // you can create multiple services for each accessory
-
-    if (accessory.context.device.CustomService) {
-      // This is only required when using Custom Services and Characteristics not support by HomeKit
-      this.service = this.accessory.getService(this.platform.CustomServices[accessory.context.device.CustomService]) ||
-        this.accessory.addService(this.platform.CustomServices[accessory.context.device.CustomService]);
-    } else {
-      this.service = this.accessory.getService(this.platform.Service.Lightbulb) || this.accessory.addService(this.platform.Service.Lightbulb);
+    // Create the humidifier service (main service)
+    this.humidifierService = this.accessory.getService(this.platform.Service.HumidifierDehumidifier) || 
+      this.accessory.addService(this.platform.Service.HumidifierDehumidifier);
+    
+    // Set the service name
+    this.humidifierService.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.displayName);
+    
+    // Configure the humidifier service
+    this.humidifierService.getCharacteristic(this.platform.Characteristic.Active)
+      .onSet(this.setActive.bind(this))
+      .onGet(this.getActive.bind(this));
+    
+    this.humidifierService.getCharacteristic(this.platform.Characteristic.CurrentHumidifierDehumidifierState)
+      .onGet(this.getCurrentHumidifierDehumidifierState.bind(this));
+    
+    this.humidifierService.getCharacteristic(this.platform.Characteristic.TargetHumidifierDehumidifierState)
+      .setProps({
+        validValues: [this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER],
+      })
+      .onGet(this.getTargetHumidifierDehumidifierState.bind(this));
+    
+    this.humidifierService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
+      .onGet(this.getCurrentRelativeHumidity.bind(this));
+    
+    this.humidifierService.getCharacteristic(this.platform.Characteristic.RelativeHumidityDehumidifierThreshold)
+      .setProps({
+        minValue: 40,
+        maxValue: 60,
+        minStep: 5,
+      })
+      .onSet(this.setRelativeHumidityDehumidifierThreshold.bind(this))
+      .onGet(this.getRelativeHumidityDehumidifierThreshold.bind(this));
+    
+    // Create the fan service for fan speed control
+    this.fanService = this.accessory.getService('Fan Speed') || 
+      this.accessory.addService(this.platform.Service.Fanv2, 'Fan Speed', 'fanspeed');
+    
+    this.fanService.setCharacteristic(this.platform.Characteristic.Name, 'Fan Speed');
+    
+    this.fanService.getCharacteristic(this.platform.Characteristic.Active)
+      .onGet(this.getFanActive.bind(this));
+    
+    this.fanService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .setProps({
+        minValue: 0,
+        maxValue: 100,
+        minStep: 50,
+      })
+      .onSet(this.setRotationSpeed.bind(this))
+      .onGet(this.getRotationSpeed.bind(this));
+    
+    // Create the humidity sensor service
+    this.humidityService = this.accessory.getService('Humidity Sensor') || 
+      this.accessory.addService(this.platform.Service.HumiditySensor, 'Humidity Sensor', 'humiditysensor');
+    
+    this.humidityService.setCharacteristic(this.platform.Characteristic.Name, 'Humidity Sensor');
+    
+    this.humidityService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
+      .onGet(this.getCurrentRelativeHumidity.bind(this));
+    
+    // Create the air purifier service for clean air mode
+    this.airPurifierService = this.accessory.getService('Clean Air Mode') || 
+      this.accessory.addService(this.platform.Service.Switch, 'Clean Air Mode', 'cleanairmode');
+    
+    this.airPurifierService.setCharacteristic(this.platform.Characteristic.Name, 'Clean Air Mode');
+    
+    this.airPurifierService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(this.setCleanAirMode.bind(this))
+      .onGet(this.getCleanAirMode.bind(this));
+    
+    // Register for state updates
+    this.accessory.on('context-update', () => {
+      if (this.accessory.context.state) {
+        this.currentState = this.accessory.context.state;
+        this.updateAllCharacteristics();
+      }
+    });
+    
+    // Initialize state if available
+    if (this.accessory.context.state) {
+      this.currentState = this.accessory.context.state;
+      this.updateAllCharacteristics();
     }
-
-    // set the service name, this is what is displayed as the default name on the Home app
-    // in this example we are using the name we stored in the `accessory.context` in the `discoverDevices` method.
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.exampleDisplayName);
-
-    // each service must implement at-minimum the "required characteristics" for the given service type
-    // see https://developers.homebridge.io/#/service/Lightbulb
-
-    // register handlers for the On/Off Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this)) // SET - bind to the `setOn` method below
-      .onGet(this.getOn.bind(this)); // GET - bind to the `getOn` method below
-
-    // register handlers for the Brightness Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.Brightness)
-      .onSet(this.setBrightness.bind(this)); // SET - bind to the `setBrightness` method below
-
-    /**
-     * Creating multiple services of the same type.
-     *
-     * To avoid "Cannot add a Service with the same UUID another Service without also defining a unique 'subtype' property." error,
-     * when creating multiple services of the same type, you need to use the following syntax to specify a name and subtype id:
-     * this.accessory.getService('NAME') || this.accessory.addService(this.platform.Service.Lightbulb, 'NAME', 'USER_DEFINED_SUBTYPE_ID');
-     *
-     * The USER_DEFINED_SUBTYPE must be unique to the platform accessory (if you platform exposes multiple accessories, each accessory
-     * can use the same subtype id.)
-     */
-
-    // Example: add two "motion sensor" services to the accessory
-    const motionSensorOneService = this.accessory.getService('Motion Sensor One Name')
-      || this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor One Name', 'YourUniqueIdentifier-1');
-
-    const motionSensorTwoService = this.accessory.getService('Motion Sensor Two Name')
-      || this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor Two Name', 'YourUniqueIdentifier-2');
-
-    /**
-     * Updating characteristics values asynchronously.
-     *
-     * Example showing how to update the state of a Characteristic asynchronously instead
-     * of using the `on('get')` handlers.
-     * Here we change update the motion sensor trigger states on and off every 10 seconds
-     * the `updateCharacteristic` method.
-     *
-     */
-    let motionDetected = false;
-    setInterval(() => {
-      // EXAMPLE - inverse the trigger
-      motionDetected = !motionDetected;
-
-      // push the new value to HomeKit
-      motionSensorOneService.updateCharacteristic(this.platform.Characteristic.MotionDetected, motionDetected);
-      motionSensorTwoService.updateCharacteristic(this.platform.Characteristic.MotionDetected, !motionDetected);
-
-      this.platform.log.debug('Triggering motionSensorOneService:', motionDetected);
-      this.platform.log.debug('Triggering motionSensorTwoService:', !motionDetected);
-    }, 10000);
+  }
+  
+  /**
+   * Update all characteristics based on the current state
+   */
+  private updateAllCharacteristics() {
+    if (!this.currentState) {
+      return;
+    }
+    
+    // Update humidifier service
+    this.humidifierService.updateCharacteristic(
+      this.platform.Characteristic.Active,
+      this.currentState.applianceState === 'RUNNING' ? 1 : 0,
+    );
+    
+    this.humidifierService.updateCharacteristic(
+      this.platform.Characteristic.CurrentHumidifierDehumidifierState,
+      this.currentState.applianceState === 'RUNNING' 
+        ? this.platform.Characteristic.CurrentHumidifierDehumidifierState.DEHUMIDIFYING
+        : this.platform.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE,
+    );
+    
+    this.humidifierService.updateCharacteristic(
+      this.platform.Characteristic.TargetHumidifierDehumidifierState,
+      this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER,
+    );
+    
+    this.humidifierService.updateCharacteristic(
+      this.platform.Characteristic.CurrentRelativeHumidity,
+      this.currentState.sensorHumidity,
+    );
+    
+    this.humidifierService.updateCharacteristic(
+      this.platform.Characteristic.RelativeHumidityDehumidifierThreshold,
+      this.currentState.targetHumidity,
+    );
+    
+    // Update fan service
+    this.fanService.updateCharacteristic(
+      this.platform.Characteristic.Active,
+      this.currentState.applianceState === 'RUNNING' ? 1 : 0,
+    );
+    
+    this.fanService.updateCharacteristic(
+      this.platform.Characteristic.RotationSpeed,
+      this.getFanSpeedValue(this.currentState.fanSpeedSetting),
+    );
+    
+    // Update humidity sensor
+    this.humidityService.updateCharacteristic(
+      this.platform.Characteristic.CurrentRelativeHumidity,
+      this.currentState.sensorHumidity,
+    );
+    
+    // Update air purifier
+    this.airPurifierService.updateCharacteristic(
+      this.platform.Characteristic.On,
+      this.currentState.cleanAirMode === 'ON',
+    );
+  }
+  
+  /**
+   * Convert fan speed string to numeric value
+   */
+  private getFanSpeedValue(speed: string): number {
+    switch (speed) {
+      case 'LOW':
+        return 33;
+      case 'MIDDLE':
+        return 66;
+      case 'HIGH':
+        return 100;
+      default:
+        return 0;
+    }
+  }
+  
+  /**
+   * Convert numeric value to fan speed string
+   */
+  private getFanSpeedString(value: number): 'LOW' | 'MIDDLE' | 'HIGH' {
+    if (value <= 33) {
+      return 'LOW';
+    } else if (value <= 66) {
+      return 'MIDDLE';
+    } else {
+      return 'HIGH';
+    }
   }
 
   /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
+   * Handle "SET" requests for the Active characteristic
    */
-  async setOn(value: CharacteristicValue) {
-    // implement your own code to turn your device on/off
-    this.exampleStates.On = value as boolean;
-
-    this.platform.log.debug('Set Characteristic On ->', value);
+  async setActive(value: CharacteristicValue) {
+    this.platform.log.debug('Set Active ->', value);
+    
+    try {
+      if (value === 1) {
+        // Turn on - use AUTO mode
+        await this.platform.electroluxApi.setMode('AUTO');
+      } else {
+        // TODO: Implement proper turn off functionality
+        // For now, we'll set it to DRY mode with high humidity to effectively turn it off
+        await this.platform.electroluxApi.setMode('DRY');
+        await this.platform.electroluxApi.setTargetHumidity(60);
+      }
+    } catch (error) {
+      this.platform.log.error('Failed to set active state:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
   }
 
   /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   *
-   * GET requests should return as fast as possible. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
-   * In this case, you may decide not to implement `onGet` handlers, which may speed up
-   * the responsiveness of your device in the Home app.
-
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
+   * Handle "GET" requests for the Active characteristic
    */
-  async getOn(): Promise<CharacteristicValue> {
-    // implement your own code to check if the device is on
-    const isOn = this.exampleStates.On;
+  async getActive(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get active state:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const isActive = this.currentState.applianceState === 'RUNNING' ? 1 : 0;
+    this.platform.log.debug('Get Active ->', isActive);
+    return isActive;
+  }
 
-    this.platform.log.debug('Get Characteristic On ->', isOn);
+  /**
+   * Handle "GET" requests for the CurrentHumidifierDehumidifierState characteristic
+   */
+  async getCurrentHumidifierDehumidifierState(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get current state:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const state = this.currentState.applianceState === 'RUNNING'
+      ? this.platform.Characteristic.CurrentHumidifierDehumidifierState.DEHUMIDIFYING
+      : this.platform.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
+    
+    this.platform.log.debug('Get CurrentHumidifierDehumidifierState ->', state);
+    return state;
+  }
 
-    // if you need to return an error to show the device as "Not Responding" in the Home app:
-    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  /**
+   * Handle "GET" requests for the TargetHumidifierDehumidifierState characteristic
+   */
+  async getTargetHumidifierDehumidifierState(): Promise<CharacteristicValue> {
+    // We only support dehumidifier mode
+    return this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER;
+  }
 
+  /**
+   * Handle "GET" requests for the CurrentRelativeHumidity characteristic
+   */
+  async getCurrentRelativeHumidity(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get humidity:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const humidity = this.currentState.sensorHumidity;
+    this.platform.log.debug('Get CurrentRelativeHumidity ->', humidity);
+    return humidity;
+  }
+
+  /**
+   * Handle "SET" requests for the RelativeHumidityDehumidifierThreshold characteristic
+   */
+  async setRelativeHumidityDehumidifierThreshold(value: CharacteristicValue) {
+    this.platform.log.debug('Set RelativeHumidityDehumidifierThreshold ->', value);
+    
+    try {
+      await this.platform.electroluxApi.setTargetHumidity(value as number);
+    } catch (error) {
+      this.platform.log.error('Failed to set target humidity:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  /**
+   * Handle "GET" requests for the RelativeHumidityDehumidifierThreshold characteristic
+   */
+  async getRelativeHumidityDehumidifierThreshold(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get target humidity:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const targetHumidity = this.currentState.targetHumidity;
+    this.platform.log.debug('Get RelativeHumidityDehumidifierThreshold ->', targetHumidity);
+    return targetHumidity;
+  }
+
+  /**
+   * Handle "GET" requests for the fan Active characteristic
+   */
+  async getFanActive(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get fan active state:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const isActive = this.currentState.applianceState === 'RUNNING' ? 1 : 0;
+    this.platform.log.debug('Get Fan Active ->', isActive);
+    return isActive;
+  }
+
+  /**
+   * Handle "SET" requests for the RotationSpeed characteristic
+   */
+  async setRotationSpeed(value: CharacteristicValue) {
+    this.platform.log.debug('Set RotationSpeed ->', value);
+    
+    try {
+      const speed = this.getFanSpeedString(value as number);
+      await this.platform.electroluxApi.setFanSpeed(speed);
+    } catch (error) {
+      this.platform.log.error('Failed to set fan speed:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  /**
+   * Handle "GET" requests for the RotationSpeed characteristic
+   */
+  async getRotationSpeed(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get fan speed:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const speed = this.getFanSpeedValue(this.currentState.fanSpeedSetting);
+    this.platform.log.debug('Get RotationSpeed ->', speed);
+    return speed;
+  }
+
+  /**
+   * Handle "SET" requests for the Clean Air Mode On characteristic
+   */
+  async setCleanAirMode(value: CharacteristicValue) {
+    this.platform.log.debug('Set Clean Air Mode ->', value);
+    
+    try {
+      await this.platform.electroluxApi.setCleanAirMode(value ? 'ON' : 'OFF');
+    } catch (error) {
+      this.platform.log.error('Failed to set clean air mode:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  /**
+   * Handle "GET" requests for the Clean Air Mode On characteristic
+   */
+  async getCleanAirMode(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      try {
+        this.currentState = await this.platform.electroluxApi.getApplianceState();
+      } catch (error) {
+        this.platform.log.error('Failed to get clean air mode:', error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    }
+    
+    const isOn = this.currentState.cleanAirMode === 'ON';
+    this.platform.log.debug('Get Clean Air Mode ->', isOn);
     return isOn;
-  }
-
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, changing the Brightness
-   */
-  async setBrightness(value: CharacteristicValue) {
-    // implement your own code to set the brightness
-    this.exampleStates.Brightness = value as number;
-
-    this.platform.log.debug('Set Characteristic Brightness -> ', value);
   }
 }

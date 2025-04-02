@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "ElectroluxDehumidifier",
   "pluginType": "platform",
   "singular": true,
   "strictValidation": false,
@@ -10,7 +10,39 @@
         "title": "Name",
         "type": "string",
         "required": true,
-        "default": "Example Dynamic Platform"
+        "default": "Electrolux Dehumidifier"
+      },
+      "apiKey": {
+        "title": "API Key",
+        "type": "string",
+        "required": true,
+        "description": "Your Electrolux API key (x-api-key)"
+      },
+      "refreshToken": {
+        "title": "Refresh Token",
+        "type": "string",
+        "required": true,
+        "description": "Your Electrolux refresh token"
+      },
+      "applianceId": {
+        "title": "Appliance ID",
+        "type": "string",
+        "required": true,
+        "description": "Your Electrolux dehumidifier appliance ID"
+      },
+      "pollingInterval": {
+        "title": "Polling Interval",
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 600,
+        "default": 60,
+        "description": "How frequently to poll for updates (in seconds)"
+      },
+      "debug": {
+        "title": "Debug Logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Enable debug logging"
       }
     }
   }
