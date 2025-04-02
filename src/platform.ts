@@ -52,6 +52,7 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
       refreshToken: config.refreshToken as string,
       applianceId: config.applianceId as string,
       debug: config.debug as boolean,
+      storagePath: api.user.storagePath(),
     }, this.log);
 
     this.log.debug('Finished initializing platform:', this.config.name);

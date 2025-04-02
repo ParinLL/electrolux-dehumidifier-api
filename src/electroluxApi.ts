@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { Logging } from 'homebridge';
+import { TokenCache } from './tokenCache.js';
 
 /**
  * Command types that can be sent to the appliance
@@ -16,6 +17,7 @@ export interface ElectroluxConfig {
   refreshToken: string;
   applianceId: string;
   debug?: boolean;
+  storagePath?: string;
 }
 
 export interface TokenResponse {
@@ -45,8 +47,12 @@ export class ElectroluxApi {
   
   private accessToken: string | null = null;
   private tokenExpiryTime: number = 0;
-  private refreshTokenExpiryTime: number = 0;
+  private lastRefreshTime: number = 0;
   private axiosInstance: AxiosInstance;
+  private tokenCache: TokenCache;
+  
+  // Minimum time between refresh token requests (6 hours in milliseconds)
+  private readonly MIN_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
   
   constructor(
     private readonly config: ElectroluxConfig,
@@ -59,17 +65,52 @@ export class ElectroluxApi {
       },
     });
     
-    // Set token expiry time to force a refresh on first API call
-    this.tokenExpiryTime = Date.now();
+    // Initialize token cache
+    this.tokenCache = new TokenCache(
+      this.config.applianceId,
+      this.log,
+      this.config.storagePath,
+    );
+    
+    // Try to load token from cache
+    const cachedToken = this.tokenCache.loadCache();
+    if (cachedToken) {
+      this.accessToken = cachedToken.accessToken;
+      this.config.refreshToken = cachedToken.refreshToken;
+      this.tokenExpiryTime = cachedToken.tokenExpiryTime;
+      this.lastRefreshTime = cachedToken.lastRefreshTime;
+      
+      this.log.debug('Loaded token from cache, expires at: ' + new Date(this.tokenExpiryTime).toISOString());
+    } else {
+      // Set token expiry time to force a refresh on first API call
+      this.tokenExpiryTime = Date.now();
+      this.lastRefreshTime = 0;
+    }
   }
   
   /**
    * Ensures we have a valid access token before making API calls
    */
   private async ensureValidToken(): Promise<void> {
+    const now = Date.now();
+    
     // If token is still valid (with 5 minute buffer), return
-    if (this.accessToken && this.tokenExpiryTime > Date.now() + 300000) {
+    if (this.accessToken && this.tokenExpiryTime > now + 300000) {
       return;
+    }
+    
+    // Check if we've refreshed the token recently (within 6 hours)
+    // Only enforce this if we already have a token (to allow initial token acquisition)
+    if (this.accessToken && this.lastRefreshTime > 0) {
+      const timeSinceLastRefresh = now - this.lastRefreshTime;
+      
+      if (timeSinceLastRefresh < this.MIN_REFRESH_INTERVAL) {
+        this.log.debug(`Token was refreshed recently (${Math.round(timeSinceLastRefresh / 60000)} minutes ago). Using existing token.`);
+        
+        // If the token is expired but we can't refresh yet, we'll try to use it anyway
+        // The API might still accept it, and if not, we'll handle the error
+        return;
+      }
     }
     
     try {
@@ -97,6 +138,17 @@ export class ElectroluxApi {
       // Set token expiry time (subtract 5 minutes for safety)
       const expiresInMs = (response.data.expiresIn - 300) * 1000;
       this.tokenExpiryTime = Date.now() + expiresInMs;
+      
+      // Update last refresh time
+      this.lastRefreshTime = Date.now();
+      
+      // Save to cache
+      this.tokenCache.saveCache({
+        accessToken: this.accessToken,
+        refreshToken: this.config.refreshToken,
+        tokenExpiryTime: this.tokenExpiryTime,
+        lastRefreshTime: this.lastRefreshTime,
+      });
       
       this.log.debug(`Token refreshed, expires in ${response.data.expiresIn} seconds`);
     } catch (error) {
