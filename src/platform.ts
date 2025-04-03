@@ -95,7 +95,7 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
    * Start polling for device state updates
    */
   startPolling() {
-    const pollingIntervalSeconds = this.config.pollingInterval as number || 60;
+    const pollingIntervalSeconds = this.config.pollingInterval as number || 30;
     this.log.debug(`Starting polling with interval: ${pollingIntervalSeconds} seconds`);
     
     // Clear any existing interval

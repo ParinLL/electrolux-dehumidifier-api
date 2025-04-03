@@ -193,6 +193,9 @@ export class ElectroluxApi {
       
       const reportedProps = response.data.properties.reported;
       
+      // Always log the raw applianceState value for debugging
+      this.log.debug(`Raw applianceState value: "${reportedProps.applianceState}"`);
+      
       // Extract the properties we're interested in
       const state: ApplianceState = {
         cleanAirMode: reportedProps.cleanAirMode,
@@ -204,6 +207,9 @@ export class ElectroluxApi {
         filterState: reportedProps.filterState,
         waterBucketLevel: reportedProps.waterBucketLevel,
       };
+      
+      // Always log the extracted applianceState value for debugging
+      this.log.debug(`Extracted applianceState value: "${state.applianceState}"`);
       
       if (this.config.debug) {
         this.log.debug('Appliance state:', JSON.stringify(state, null, 2));
