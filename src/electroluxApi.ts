@@ -261,9 +261,17 @@ export class ElectroluxApi {
   
   /**
    * Turn the appliance on with AUTO mode and clean air mode ON
+   * First sets mode to AUTO, waits 1 second, then sets cleanAirMode to ON
    */
   async turnOn(): Promise<void> {
-    await this.sendCommand({ mode: 'AUTO', cleanAirMode: 'ON' });
+    // First set mode to AUTO
+    await this.sendCommand({ mode: 'AUTO' });
+    
+    // Wait for 1 second
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Then set cleanAirMode to ON
+    await this.sendCommand({ cleanAirMode: 'ON' });
   }
   
   /**
