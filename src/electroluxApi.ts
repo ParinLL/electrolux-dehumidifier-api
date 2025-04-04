@@ -179,10 +179,19 @@ export class ElectroluxApi {
    * Get the current state of the appliance
    */
   async getApplianceState(): Promise<ApplianceState> {
+    if (this.config.debug) {
+      this.log.debug('getApplianceState: Fetching current appliance state');
+    }
+    
     await this.ensureValidToken();
     
     try {
       const url = `${this.applianceStateUrl}/${this.config.applianceId}/state`;
+      
+      if (this.config.debug) {
+        this.log.debug(`getApplianceState: Making API request to ${url}`);
+        this.log.debug(`getApplianceState: Using applianceId: ${this.config.applianceId}`);
+      }
       
       const response = await this.axiosInstance.get(url, {
         headers: {
@@ -191,10 +200,19 @@ export class ElectroluxApi {
         },
       });
       
+      if (this.config.debug) {
+        this.log.debug('getApplianceState: API response received');
+        this.log.debug(`getApplianceState: Response status: ${response.status}`);
+      }
+      
       const reportedProps = response.data.properties.reported;
       
-      // Always log the raw applianceState value for debugging
-      this.log.debug(`Raw applianceState value: "${reportedProps.applianceState}"`);
+      // Only log detailed state information when debug mode is enabled
+      if (this.config.debug) {
+        this.log.debug('getApplianceState: Raw API response properties:');
+        this.log.debug(JSON.stringify(reportedProps, null, 2));
+        this.log.debug(`getApplianceState: Raw applianceState value: "${reportedProps.applianceState}"`);
+      }
       
       // Extract the properties we're interested in
       const state: ApplianceState = {
@@ -208,11 +226,14 @@ export class ElectroluxApi {
         waterBucketLevel: reportedProps.waterBucketLevel,
       };
       
-      // Always log the extracted applianceState value for debugging
-      this.log.debug(`Extracted applianceState value: "${state.applianceState}"`);
-      
+      // Only log the extracted applianceState value when debug mode is enabled
       if (this.config.debug) {
-        this.log.debug('Appliance state:', JSON.stringify(state, null, 2));
+        this.log.debug(`getApplianceState: Extracted applianceState value: "${state.applianceState}"`);
+        this.log.debug(`getApplianceState: Extracted cleanAirMode value: "${state.cleanAirMode}"`);
+        this.log.debug(`getApplianceState: Extracted mode value: "${state.mode}"`);
+        this.log.debug(`getApplianceState: Extracted sensorHumidity value: ${state.sensorHumidity}`);
+        this.log.debug('getApplianceState: Complete extracted state:');
+        this.log.debug(JSON.stringify(state, null, 2));
       }
       
       return state;
@@ -230,14 +251,26 @@ export class ElectroluxApi {
    * Set the clean air mode (ON/OFF)
    */
   async setCleanAirMode(mode: 'ON' | 'OFF'): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug(`setCleanAirMode: Setting clean air mode to ${mode}`);
+    }
     await this.sendCommand({ cleanAirMode: mode });
+    if (this.config.debug) {
+      this.log.debug(`setCleanAirMode: Clean air mode set to ${mode} successfully`);
+    }
   }
   
   /**
    * Set the operation mode (AUTO/DRY/QUIET)
    */
   async setMode(mode: 'AUTO' | 'DRY' | 'QUIET'): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug(`setMode: Setting operation mode to ${mode}`);
+    }
     await this.sendCommand({ mode });
+    if (this.config.debug) {
+      this.log.debug(`setMode: Operation mode set to ${mode} successfully`);
+    }
   }
   
   /**
@@ -245,24 +278,48 @@ export class ElectroluxApi {
    * Note: Can only be set when in DRY mode
    */
   async setTargetHumidity(humidity: number): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug(`setTargetHumidity: Setting target humidity to ${humidity}%`);
+    }
+    
     // Ensure humidity is within valid range and step
     const validHumidity = Math.min(Math.max(Math.round(humidity / 5) * 5, 40), 60);
     
+    if (this.config.debug && validHumidity !== humidity) {
+      this.log.debug(`setTargetHumidity: Adjusted humidity from ${humidity}% to valid value ${validHumidity}% (must be between 40-60% in steps of 5)`);
+    }
+    
     await this.sendCommand({ targetHumidity: validHumidity });
+    
+    if (this.config.debug) {
+      this.log.debug(`setTargetHumidity: Target humidity set to ${validHumidity}% successfully`);
+    }
   }
   
   /**
    * Set the fan speed (HIGH/MIDDLE/LOW)
    */
   async setFanSpeed(speed: 'HIGH' | 'MIDDLE' | 'LOW'): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug(`setFanSpeed: Setting fan speed to ${speed}`);
+    }
     await this.sendCommand({ fanSpeedSetting: speed });
+    if (this.config.debug) {
+      this.log.debug(`setFanSpeed: Fan speed set to ${speed} successfully`);
+    }
   }
   
   /**
    * Turn the appliance off
    */
   async turnOff(): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug('turnOff: Turning off the appliance');
+    }
     await this.sendCommand({ executeCommand: 'OFF' });
+    if (this.config.debug) {
+      this.log.debug('turnOff: Command sent successfully');
+    }
   }
   
   /**
@@ -270,30 +327,54 @@ export class ElectroluxApi {
    * First sets mode to AUTO, waits 1 second, then sets cleanAirMode to ON
    */
   async turnOn(): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug('turnOn: Turning on the appliance with AUTO mode and clean air mode ON');
+    }
+    
     // First set mode to AUTO
+    if (this.config.debug) {
+      this.log.debug('turnOn: Setting mode to AUTO');
+    }
     await this.sendCommand({ mode: 'AUTO' });
     
     // Wait for 1 second
+    if (this.config.debug) {
+      this.log.debug('turnOn: Waiting 1 second before setting clean air mode');
+    }
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     // Then set cleanAirMode to ON
+    if (this.config.debug) {
+      this.log.debug('turnOn: Setting cleanAirMode to ON');
+    }
     await this.sendCommand({ cleanAirMode: 'ON' });
+    
+    if (this.config.debug) {
+      this.log.debug('turnOn: Device turned on successfully');
+    }
   }
   
   /**
    * Send a command to the appliance
    */
   private async sendCommand(command: ApplianceCommand): Promise<void> {
+    if (this.config.debug) {
+      this.log.debug('sendCommand: Preparing to send command to appliance');
+    }
+    
     await this.ensureValidToken();
     
     try {
       const url = `${this.applianceCommandUrl}/${this.config.applianceId}/command`;
       
       if (this.config.debug) {
-        this.log.debug('Sending command:', JSON.stringify(command, null, 2));
+        this.log.debug(`sendCommand: Sending command to ${url}`);
+        this.log.debug(`sendCommand: Using applianceId: ${this.config.applianceId}`);
+        this.log.debug('sendCommand: Command payload:');
+        this.log.debug(JSON.stringify(command, null, 2));
       }
       
-      await this.axiosInstance.put(
+      const response = await this.axiosInstance.put(
         url,
         command,
         {
@@ -304,7 +385,24 @@ export class ElectroluxApi {
         },
       );
       
-      this.log.debug('Command sent successfully');
+      if (this.config.debug) {
+        this.log.debug(`sendCommand: Command sent successfully with status ${response.status}`);
+        
+        // Log specific command details for better debugging
+        if (command.executeCommand === 'OFF') {
+          this.log.debug('sendCommand: Device turned OFF');
+        } else if (command.mode) {
+          this.log.debug(`sendCommand: Mode set to ${command.mode}`);
+        } else if (command.cleanAirMode) {
+          this.log.debug(`sendCommand: Clean air mode set to ${command.cleanAirMode}`);
+        } else if (command.targetHumidity) {
+          this.log.debug(`sendCommand: Target humidity set to ${command.targetHumidity}%`);
+        } else if (command.fanSpeedSetting) {
+          this.log.debug(`sendCommand: Fan speed set to ${command.fanSpeedSetting}`);
+        }
+      } else {
+        this.log.debug('Command sent successfully');
+      }
     } catch (error) {
       if (axios.isAxiosError(error) && error.response) {
         this.log.error(`Failed to send command with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);

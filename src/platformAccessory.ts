@@ -76,18 +76,22 @@ export class ElectroluxDehumidifierAccessory {
       return;
     }
     
-    // Log the raw applianceState value for debugging
-    this.platform.log.debug(`Raw applianceState value in updateAllCharacteristics: "${this.currentState.applianceState}"`);
+    // Log the complete state object when debug is enabled
+    if (this.platform.config.debug) {
+      this.platform.log.debug('updateAllCharacteristics: Current state object:');
+      this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
+    }
     
-    // Map applianceState to ON/OFF
-    // 'RUNNING' means the appliance is ON, any other state means it's OFF
-    const isOn = this.currentState.applianceState === 'RUNNING';
+    // Determine if the device is ON or OFF based on multiple factors
+    const isOn = this.determineDeviceOnState(this.currentState);
     
-    // Log the actual state and the mapped ON/OFF value
-    this.platform.log.debug(
-      `Updating state: ${this.currentState.applianceState}, mapped to: ${isOn ? 'ON' : 'OFF'}, ` +
-      `humidity: ${this.currentState.sensorHumidity}%`,
-    );
+    // Only log detailed state information when debug mode is enabled
+    if (this.platform.config.debug) {
+      this.platform.log.debug(
+        `updateAllCharacteristics: Final state: applianceState="${this.currentState.applianceState}", cleanAirMode="${this.currentState.cleanAirMode}", ` +
+        `mode="${this.currentState.mode}", mapped to: ${isOn ? 'ON' : 'OFF'}, humidity: ${this.currentState.sensorHumidity}%`,
+      );
+    }
     
     // Update switch service
     this.platform.log.debug(`Setting switch characteristic to: ${isOn}`);
@@ -104,20 +108,106 @@ export class ElectroluxDehumidifierAccessory {
   }
   
   /**
+   * Determine if the device is ON or OFF based on the current state
+   * This is a centralized function to ensure consistent ON/OFF determination
+   * across all methods
+   */
+  private determineDeviceOnState(state: ApplianceState): boolean {
+    // Log detailed information about the state when debug is enabled
+    if (this.platform.config.debug) {
+      this.platform.log.debug(
+        `determineDeviceOnState: Analyzing state - applianceState="${state.applianceState}", ` +
+        `cleanAirMode="${state.cleanAirMode}", mode="${state.mode}"`,
+      );
+    }
+    
+    // CASE 1: If applianceState is 'RUNNING', the device is definitely ON
+    if (state.applianceState === 'RUNNING') {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('determineDeviceOnState: applianceState is RUNNING => Device is ON');
+      }
+      return true;
+    }
+    
+    // CASE 2: If applianceState is 'OFF', the device is definitely OFF
+    if (state.applianceState === 'OFF') {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('determineDeviceOnState: applianceState is OFF => Device is OFF');
+      }
+      return false;
+    }
+    
+    // CASE 3: For other applianceState values, we need to check additional factors
+    
+    // Check if cleanAirMode is ON
+    const isCleanAirModeOn = state.cleanAirMode === 'ON';
+    if (this.platform.config.debug) {
+      this.platform.log.debug(`determineDeviceOnState: cleanAirMode="${state.cleanAirMode}" => isCleanAirModeOn=${isCleanAirModeOn}`);
+    }
+    
+    // Check if a mode is set (not empty)
+    const hasModeSet = state.mode && state.mode !== '';
+    if (this.platform.config.debug) {
+      this.platform.log.debug(`determineDeviceOnState: mode="${state.mode}" => hasModeSet=${hasModeSet}`);
+    }
+    
+    // Check if fan speed is set to something other than OFF
+    const hasFanSpeed = state.fanSpeedSetting && state.fanSpeedSetting !== '' && state.fanSpeedSetting !== 'OFF';
+    if (this.platform.config.debug) {
+      this.platform.log.debug(`determineDeviceOnState: fanSpeedSetting="${state.fanSpeedSetting}" => hasFanSpeed=${hasFanSpeed}`);
+    }
+    
+    // If cleanAirMode is ON and a mode is set, consider the device to be ON
+    if (isCleanAirModeOn && hasModeSet) {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('determineDeviceOnState: cleanAirMode is ON and mode is set => Device is ON');
+      }
+      return true;
+    }
+    
+    // If a mode is set and fan speed is active, consider the device to be ON
+    if (hasModeSet && hasFanSpeed) {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('determineDeviceOnState: Mode is set and fan speed is active => Device is ON');
+      }
+      return true;
+    }
+    
+    // Default case: If none of the above conditions are met, consider the device to be OFF
+    if (this.platform.config.debug) {
+      this.platform.log.debug('determineDeviceOnState: No ON conditions met => Device is OFF');
+    }
+    return false;
+  }
+  
+  /**
    * Handle "GET" requests for the CurrentRelativeHumidity characteristic
    */
   async getCurrentHumidity(): Promise<CharacteristicValue> {
     if (!this.currentState) {
       try {
+        this.platform.log.debug('getCurrentHumidity: No current state, fetching from API');
         this.currentState = await this.platform.electroluxApi.getApplianceState();
+        
+        // Log the complete state object when debug is enabled
+        if (this.platform.config.debug) {
+          this.platform.log.debug('getCurrentHumidity: Fetched state object:');
+          this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
+        }
       } catch (error) {
         this.platform.log.error('Failed to get humidity:', error);
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
+    } else if (this.platform.config.debug) {
+      this.platform.log.debug('getCurrentHumidity: Using cached state object');
     }
     
     const humidity = this.currentState.sensorHumidity;
-    this.platform.log.debug('Get CurrentRelativeHumidity ->', humidity);
+    
+    if (this.platform.config.debug) {
+      this.platform.log.debug(`getCurrentHumidity: Current humidity value is ${humidity}%`);
+    }
+    
     return humidity;
   }
   
@@ -133,13 +223,32 @@ export class ElectroluxDehumidifierAccessory {
       setInterval(() => {
         if (this.accessory.context.state) {
           // Log the raw applianceState value from context for debugging
-          if (this.accessory.context.state.applianceState) {
-            this.platform.log.debug(`Context state applianceState: "${this.accessory.context.state.applianceState}"`);
+          if (this.platform.config.debug && this.accessory.context.state.applianceState) {
+            this.platform.log.debug(`setupStateUpdateHandler: Context state applianceState: "${this.accessory.context.state.applianceState}"`);
+            
+            // Log more details about the context state when debug is enabled
+            this.platform.log.debug('setupStateUpdateHandler: Context state object:');
+            this.platform.log.debug(JSON.stringify(this.accessory.context.state, null, 2));
           }
           
-          if (!this.currentState || 
-              JSON.stringify(this.accessory.context.state) !== JSON.stringify(this.currentState)) {
-            this.platform.log.debug('State changed, updating characteristics');
+          // Check if state has changed
+          const stateChanged = !this.currentState || 
+              JSON.stringify(this.accessory.context.state) !== JSON.stringify(this.currentState);
+          
+          if (this.platform.config.debug) {
+            this.platform.log.debug(`setupStateUpdateHandler: State changed: ${stateChanged}`);
+            
+            if (stateChanged && this.currentState) {
+              // Log the differences between the old and new state
+              this.platform.log.debug('setupStateUpdateHandler: Previous state:');
+              this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
+              this.platform.log.debug('setupStateUpdateHandler: New state:');
+              this.platform.log.debug(JSON.stringify(this.accessory.context.state, null, 2));
+            }
+          }
+          
+          if (stateChanged) {
+            this.platform.log.debug('setupStateUpdateHandler: State changed, updating characteristics');
             this.currentState = this.accessory.context.state;
             this.updateAllCharacteristics();
           }
@@ -152,18 +261,30 @@ export class ElectroluxDehumidifierAccessory {
    * Handle "SET" requests for the On characteristic
    */
   async setOn(value: CharacteristicValue) {
-    this.platform.log.debug('Set On ->', value);
+    this.platform.log.debug(`setOn: Setting device to ${value ? 'ON' : 'OFF'}`);
     
     try {
       if (value) {
         // Turn on with AUTO mode and clean air mode ON
+        if (this.platform.config.debug) {
+          this.platform.log.debug('setOn: Turning device ON with AUTO mode and clean air mode ON');
+        }
         await this.platform.electroluxApi.turnOn();
+        if (this.platform.config.debug) {
+          this.platform.log.debug('setOn: Device turned ON successfully');
+        }
       } else {
         // Turn off
+        if (this.platform.config.debug) {
+          this.platform.log.debug('setOn: Turning device OFF');
+        }
         await this.platform.electroluxApi.turnOff();
+        if (this.platform.config.debug) {
+          this.platform.log.debug('setOn: Device turned OFF successfully');
+        }
       }
     } catch (error) {
-      this.platform.log.error('Failed to set on state:', error);
+      this.platform.log.error(`setOn: Failed to set device to ${value ? 'ON' : 'OFF'}:`, error);
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
   }
@@ -174,24 +295,33 @@ export class ElectroluxDehumidifierAccessory {
   async getOn(): Promise<CharacteristicValue> {
     if (!this.currentState) {
       try {
-        this.platform.log.debug('No current state, fetching from API');
+        this.platform.log.debug('getOn: No current state, fetching from API');
         this.currentState = await this.platform.electroluxApi.getApplianceState();
+        
+        // Log the complete state object when debug is enabled
+        if (this.platform.config.debug) {
+          this.platform.log.debug('getOn: Fetched state object:');
+          this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
+        }
       } catch (error) {
         this.platform.log.error('Failed to get on state:', error);
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
+    } else if (this.platform.config.debug) {
+      this.platform.log.debug('getOn: Using cached state object:');
+      this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
     }
     
-    // Log the raw applianceState value for debugging
-    this.platform.log.debug(`Raw applianceState value in getOn: "${this.currentState.applianceState}"`);
+    // Use the centralized function to determine if the device is ON or OFF
+    const isOn = this.determineDeviceOnState(this.currentState);
     
-    // Map applianceState to ON/OFF
-    // 'RUNNING' means the appliance is ON, any other state means it's OFF
-    const isOn = this.currentState.applianceState === 'RUNNING';
-    
-    // Log the actual state and the mapped ON/OFF value
-    this.platform.log.debug(`Appliance state: ${this.currentState.applianceState}, mapped to: ${isOn ? 'ON' : 'OFF'}`);
-    this.platform.log.debug(`Returning isOn value: ${isOn}`);
+    // Only log detailed state information when debug mode is enabled
+    if (this.platform.config.debug) {
+      this.platform.log.debug(
+        `getOn: Final decision: applianceState="${this.currentState.applianceState}", cleanAirMode="${this.currentState.cleanAirMode}", ` +
+        `mode="${this.currentState.mode}", mapped to: ${isOn ? 'ON' : 'OFF'}`,
+      );
+    }
     
     return isOn;
   }
