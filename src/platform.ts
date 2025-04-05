@@ -135,20 +135,16 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
           );
         }
         
-        // Update all accessories with the new state
+        // We no longer need to update the accessory context with the state
+        // since we're always fetching the latest state from the API in platformAccessory.ts
+        // This is kept for logging purposes only
         const accessoryCount = this.accessories.size;
         if (this.config.debug) {
-          this.log.debug(`startPolling: Updating ${accessoryCount} accessories with new state`);
-        }
-        
-        for (const [uuid, accessory] of this.accessories) {
-          if (this.config.debug) {
-            this.log.debug(`startPolling: Updating accessory ${accessory.displayName} (${uuid}) with new state`);
-          }
-          accessory.context.state = state;
-          
-          // Trigger an update event that the accessory can listen for
-          this.api.updatePlatformAccessories([accessory]);
+          this.log.debug(`startPolling: Polled state for ${accessoryCount} accessories`);
+          this.log.debug(
+            `startPolling: State: applianceState="${state.applianceState}", ` +
+            `mode=${state.mode}, cleanAirMode=${state.cleanAirMode}, humidity=${state.sensorHumidity}%`,
+          );
         }
         
         if (this.config.debug) {
@@ -176,12 +172,13 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
           this.log.warn(`Water bucket level is high (${state.waterBucketLevel}%) - please empty soon!`);
         }
         
-        for (const [uuid, accessory] of this.accessories) {
-          if (this.config.debug) {
-            this.log.debug(`startPolling: Updating accessory ${accessory.displayName} (${uuid}) with initial state`);
-          }
-          accessory.context.state = state;
-          this.api.updatePlatformAccessories([accessory]);
+        // We no longer need to update the accessory context with the state
+        // since we're always fetching the latest state from the API in platformAccessory.ts
+        if (this.config.debug) {
+          this.log.debug(
+            `startPolling: Initial state: applianceState="${state.applianceState}", ` +
+            `mode=${state.mode}, cleanAirMode=${state.cleanAirMode}, humidity=${state.sensorHumidity}%`,
+          );
         }
         
         if (this.config.debug) {

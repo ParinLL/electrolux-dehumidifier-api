@@ -60,11 +60,8 @@ export class ElectroluxDehumidifierAccessory {
     // Set up a method to handle state updates
     this.setupStateUpdateHandler();
     
-    // Initialize state if available
-    if (this.accessory.context.state) {
-      this.currentState = this.accessory.context.state;
-      this.updateAllCharacteristics();
-    }
+    // We'll fetch the state from the API when needed instead of using cached state
+    // This ensures we always have the latest state
   }
   
   /**
@@ -184,22 +181,18 @@ export class ElectroluxDehumidifierAccessory {
    * Handle "GET" requests for the CurrentRelativeHumidity characteristic
    */
   async getCurrentHumidity(): Promise<CharacteristicValue> {
-    if (!this.currentState) {
-      try {
-        this.platform.log.debug('getCurrentHumidity: No current state, fetching from API');
-        this.currentState = await this.platform.electroluxApi.getApplianceState();
-        
-        // Log the complete state object when debug is enabled
-        if (this.platform.config.debug) {
-          this.platform.log.debug('getCurrentHumidity: Fetched state object:');
-          this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
-        }
-      } catch (error) {
-        this.platform.log.error('Failed to get humidity:', error);
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    try {
+      this.platform.log.debug('getCurrentHumidity: Fetching current state from API');
+      this.currentState = await this.platform.electroluxApi.getApplianceState();
+      
+      // Log the complete state object when debug is enabled
+      if (this.platform.config.debug) {
+        this.platform.log.debug('getCurrentHumidity: Fetched state object:');
+        this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
       }
-    } else if (this.platform.config.debug) {
-      this.platform.log.debug('getCurrentHumidity: Using cached state object');
+    } catch (error) {
+      this.platform.log.error('Failed to get humidity:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     
     const humidity = this.currentState.sensorHumidity;
@@ -219,41 +212,9 @@ export class ElectroluxDehumidifierAccessory {
   private setupStateUpdateHandler() {
     // Monitor for changes to the accessory context
     this.platform.api.on('didFinishLaunching', () => {
-      // Check for state updates periodically
-      setInterval(() => {
-        if (this.accessory.context.state) {
-          // Log the raw applianceState value from context for debugging
-          if (this.platform.config.debug && this.accessory.context.state.applianceState) {
-            this.platform.log.debug(`setupStateUpdateHandler: Context state applianceState: "${this.accessory.context.state.applianceState}"`);
-            
-            // Log more details about the context state when debug is enabled
-            this.platform.log.debug('setupStateUpdateHandler: Context state object:');
-            this.platform.log.debug(JSON.stringify(this.accessory.context.state, null, 2));
-          }
-          
-          // Check if state has changed
-          const stateChanged = !this.currentState || 
-              JSON.stringify(this.accessory.context.state) !== JSON.stringify(this.currentState);
-          
-          if (this.platform.config.debug) {
-            this.platform.log.debug(`setupStateUpdateHandler: State changed: ${stateChanged}`);
-            
-            if (stateChanged && this.currentState) {
-              // Log the differences between the old and new state
-              this.platform.log.debug('setupStateUpdateHandler: Previous state:');
-              this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
-              this.platform.log.debug('setupStateUpdateHandler: New state:');
-              this.platform.log.debug(JSON.stringify(this.accessory.context.state, null, 2));
-            }
-          }
-          
-          if (stateChanged) {
-            this.platform.log.debug('setupStateUpdateHandler: State changed, updating characteristics');
-            this.currentState = this.accessory.context.state;
-            this.updateAllCharacteristics();
-          }
-        }
-      }, 1000); // Check every second
+      // We don't need to check for state updates periodically here anymore
+      // since we're always fetching the latest state from the API in getOn and getCurrentHumidity
+      // This handler is kept for backward compatibility
     });
   }
 
@@ -293,23 +254,18 @@ export class ElectroluxDehumidifierAccessory {
    * Handle "GET" requests for the On characteristic
    */
   async getOn(): Promise<CharacteristicValue> {
-    if (!this.currentState) {
-      try {
-        this.platform.log.debug('getOn: No current state, fetching from API');
-        this.currentState = await this.platform.electroluxApi.getApplianceState();
-        
-        // Log the complete state object when debug is enabled
-        if (this.platform.config.debug) {
-          this.platform.log.debug('getOn: Fetched state object:');
-          this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
-        }
-      } catch (error) {
-        this.platform.log.error('Failed to get on state:', error);
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    try {
+      this.platform.log.debug('getOn: Fetching current state from API');
+      this.currentState = await this.platform.electroluxApi.getApplianceState();
+      
+      // Log the complete state object when debug is enabled
+      if (this.platform.config.debug) {
+        this.platform.log.debug('getOn: Fetched state object:');
+        this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
       }
-    } else if (this.platform.config.debug) {
-      this.platform.log.debug('getOn: Using cached state object:');
-      this.platform.log.debug(JSON.stringify(this.currentState, null, 2));
+    } catch (error) {
+      this.platform.log.error('Failed to get on state:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     
     // Use the centralized function to determine if the device is ON or OFF
