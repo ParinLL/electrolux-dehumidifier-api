@@ -147,9 +147,13 @@ export class ElectroluxDehumidifierAccessory {
     
     const speed = this.currentState.fanSpeedSetting;
     let rotationSpeed = 0;
-    if (speed === 'HIGH') rotationSpeed = 100;
-    else if (speed === 'MIDDLE') rotationSpeed = 50;
-    else if (speed === 'LOW') rotationSpeed = 25;
+    if (speed === 'HIGH') {
+      rotationSpeed = 100;
+    } else if (speed === 'MIDDLE') {
+      rotationSpeed = 50;
+    } else if (speed === 'LOW') {
+      rotationSpeed = 25;
+    }
     this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, rotationSpeed);
 
     // Update mode switches
@@ -403,19 +407,30 @@ export class ElectroluxDehumidifierAccessory {
   }
 
   async getFanSpeed(): Promise<CharacteristicValue> {
-    if (!this.currentState) await this.getCurrentStateFromApi();
+    if (!this.currentState) {
+      await this.getCurrentStateFromApi();
+    }
     const speed = this.currentState?.fanSpeedSetting;
-    if (speed === 'HIGH') return 100;
-    if (speed === 'MIDDLE') return 50;
-    if (speed === 'LOW') return 25;
+    if (speed === 'HIGH') {
+      return 100;
+    }
+    if (speed === 'MIDDLE') {
+      return 50;
+    }
+    if (speed === 'LOW') {
+      return 25;
+    }
     return 0;
   }
 
   async setFanSpeed(value: CharacteristicValue) {
     const numValue = value as number;
     let targetSpeed: 'HIGH' | 'MIDDLE' | 'LOW' = 'LOW';
-    if (numValue > 66) targetSpeed = 'HIGH';
-    else if (numValue > 33) targetSpeed = 'MIDDLE';
+    if (numValue > 66) {
+      targetSpeed = 'HIGH';
+    } else if (numValue > 33) {
+      targetSpeed = 'MIDDLE';
+    }
     
     this.platform.log.debug(`Setting fan speed to ${targetSpeed} (${numValue}%)`);
     try {
@@ -430,7 +445,9 @@ export class ElectroluxDehumidifierAccessory {
    * Mode Control Handlers
    */
   async getModeState(mode: 'AUTO' | 'DRY' | 'QUIET'): Promise<CharacteristicValue> {
-    if (!this.currentState) await this.getCurrentStateFromApi();
+    if (!this.currentState) {
+      await this.getCurrentStateFromApi();
+    }
     return this.currentState?.mode === mode;
   }
 
@@ -441,9 +458,15 @@ export class ElectroluxDehumidifierAccessory {
         await this.platform.electroluxApi.setMode(mode);
         
         // Ensure other switches appear off in the Home app
-        if (mode !== 'AUTO') this.autoModeService.updateCharacteristic(this.platform.Characteristic.On, false);
-        if (mode !== 'DRY') this.dryModeService.updateCharacteristic(this.platform.Characteristic.On, false);
-        if (mode !== 'QUIET') this.quietModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+        if (mode !== 'AUTO') {
+          this.autoModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+        }
+        if (mode !== 'DRY') {
+          this.dryModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+        }
+        if (mode !== 'QUIET') {
+          this.quietModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+        }
       } catch (error) {
         this.platform.log.error(`Failed to set mode ${mode}:`, error);
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
