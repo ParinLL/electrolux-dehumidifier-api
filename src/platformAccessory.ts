@@ -15,6 +15,8 @@ export class ElectroluxDehumidifierAccessory {
   
   // Keep track of the current state
   private currentState: ApplianceState | null = null;
+  private shutdownTimer: NodeJS.Timeout | null = null;
+  private isShuttingDown: boolean = false;
 
   constructor(
     private readonly platform: ElectroluxDehumidifierPlatform,
@@ -226,6 +228,13 @@ export class ElectroluxDehumidifierAccessory {
     
     try {
       if (value) {
+        // Cancel any pending shutdown
+        if (this.shutdownTimer) {
+          clearTimeout(this.shutdownTimer);
+          this.shutdownTimer = null;
+        }
+        this.isShuttingDown = false;
+
         // Turn on with AUTO mode and clean air mode ON
         if (this.platform.config.debug) {
           this.platform.log.debug('setOn: Turning device ON with AUTO mode and clean air mode ON');
@@ -235,14 +244,39 @@ export class ElectroluxDehumidifierAccessory {
           this.platform.log.debug('setOn: Device turned ON successfully');
         }
       } else {
-        // Turn off
+        // Instead of immediate turn off, start a 20-minute cooldown
         if (this.platform.config.debug) {
-          this.platform.log.debug('setOn: Turning device OFF');
+          this.platform.log.debug('setOn: Starting 20-minute fan cooldown before turning device OFF');
         }
-        await this.platform.electroluxApi.turnOff();
-        if (this.platform.config.debug) {
-          this.platform.log.debug('setOn: Device turned OFF successfully');
+        this.platform.log.info('設備已進入送風冷卻模式，將於 20 分鐘後自動關閉。');
+        this.isShuttingDown = true;
+        
+        // Use QUIET mode for cooldown requested by user
+        try {
+          await this.platform.electroluxApi.setMode('QUIET');
+        } catch (e) {
+          this.platform.log.warn('setOn: Failed to set QUIET mode for cooldown', e);
         }
+
+        // Clear any existing timer
+        if (this.shutdownTimer) {
+          clearTimeout(this.shutdownTimer);
+        }
+
+        // Schedule actual turn off after 20 minutes (20 * 60 * 1000 ms)
+        this.shutdownTimer = setTimeout(async () => {
+          this.platform.log.info('20 分鐘送風結束，正在關閉設備。');
+          try {
+            await this.platform.electroluxApi.turnOff();
+            this.isShuttingDown = false;
+            this.shutdownTimer = null;
+            if (this.platform.config.debug) {
+              this.platform.log.debug('setOn: Device turned OFF successfully after cooldown');
+            }
+          } catch (error) {
+            this.platform.log.error('setOn: Failed to turn OFF device after cooldown:', error);
+          }
+        }, 20 * 60 * 1000);
       }
     } catch (error) {
       this.platform.log.error(`setOn: Failed to set device to ${value ? 'ON' : 'OFF'}:`, error);
@@ -254,6 +288,14 @@ export class ElectroluxDehumidifierAccessory {
    * Handle "GET" requests for the On characteristic
    */
   async getOn(): Promise<CharacteristicValue> {
+    // Spoof OFF state during cooldown phase
+    if (this.isShuttingDown) {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('getOn: Device is currently in shutdown cooldown phase, returning OFF');
+      }
+      return false;
+    }
+
     try {
       this.platform.log.debug('getOn: Fetching current state from API');
       this.currentState = await this.platform.electroluxApi.getApplianceState();
