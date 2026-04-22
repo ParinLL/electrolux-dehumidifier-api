@@ -12,6 +12,10 @@ export class ElectroluxDehumidifierAccessory {
   // Services
   private switchService: Service;
   private humiditySensorService: Service;
+  private fanService: Service;
+  private autoModeService: Service;
+  private dryModeService: Service;
+  private quietModeService: Service;
   
   // Keep track of the current state
   private currentState: ApplianceState | null = null;
@@ -58,6 +62,36 @@ export class ElectroluxDehumidifierAccessory {
     // Configure the humidity sensor service
     this.humiditySensorService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
       .onGet(this.getCurrentHumidity.bind(this));
+
+    // Create a Facev2 service for Fan speed control
+    this.fanService = this.accessory.getService(this.platform.Service.Fanv2) || 
+      this.accessory.addService(this.platform.Service.Fanv2, 'Fan');
+    this.fanService.setCharacteristic(this.platform.Characteristic.Name, 'Fan Speed');
+    this.fanService.getCharacteristic(this.platform.Characteristic.Active)
+      .onGet(this.getFanActive.bind(this))
+      .onSet(this.setFanActive.bind(this));
+    this.fanService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .onGet(this.getFanSpeed.bind(this))
+      .onSet(this.setFanSpeed.bind(this));
+
+    // Create Switch services for Mode control
+    this.autoModeService = this.accessory.getServiceById(this.platform.Service.Switch, 'AutoMode') || 
+      this.accessory.addService(this.platform.Service.Switch, 'Auto Mode', 'AutoMode');
+    this.autoModeService.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(() => this.getModeState('AUTO'))
+      .onSet((val) => this.setModeState('AUTO', val));
+
+    this.dryModeService = this.accessory.getServiceById(this.platform.Service.Switch, 'DryMode') || 
+      this.accessory.addService(this.platform.Service.Switch, 'Dry Mode', 'DryMode');
+    this.dryModeService.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(() => this.getModeState('DRY'))
+      .onSet((val) => this.setModeState('DRY', val));
+
+    this.quietModeService = this.accessory.getServiceById(this.platform.Service.Switch, 'QuietMode') || 
+      this.accessory.addService(this.platform.Service.Switch, 'Quiet Mode', 'QuietMode');
+    this.quietModeService.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(() => this.getModeState('QUIET'))
+      .onSet((val) => this.setModeState('QUIET', val));
     
     // Set up a method to handle state updates
     this.setupStateUpdateHandler();
@@ -104,6 +138,24 @@ export class ElectroluxDehumidifierAccessory {
       this.platform.Characteristic.CurrentRelativeHumidity,
       this.currentState.sensorHumidity,
     );
+    
+    // Update fan service
+    this.fanService.updateCharacteristic(
+      this.platform.Characteristic.Active,
+      isOn ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE,
+    );
+    
+    const speed = this.currentState.fanSpeedSetting;
+    let rotationSpeed = 0;
+    if (speed === 'HIGH') rotationSpeed = 100;
+    else if (speed === 'MIDDLE') rotationSpeed = 50;
+    else if (speed === 'LOW') rotationSpeed = 25;
+    this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, rotationSpeed);
+
+    // Update mode switches
+    this.autoModeService.updateCharacteristic(this.platform.Characteristic.On, this.currentState.mode === 'AUTO');
+    this.dryModeService.updateCharacteristic(this.platform.Characteristic.On, this.currentState.mode === 'DRY');
+    this.quietModeService.updateCharacteristic(this.platform.Characteristic.On, this.currentState.mode === 'QUIET');
   }
   
   /**
@@ -324,4 +376,86 @@ export class ElectroluxDehumidifierAccessory {
     return isOn;
   }
 
+  /**
+   * Helper to fetch latest state
+   */
+  async getCurrentStateFromApi() {
+    try {
+      this.platform.log.debug('Fetching current state from API globally');
+      this.currentState = await this.platform.electroluxApi.getApplianceState();
+    } catch (error) {
+      this.platform.log.error('Failed to get state:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  /**
+   * Fan Mode & Speed Handlers
+   */
+  async getFanActive(): Promise<CharacteristicValue> {
+    const isOn = await this.getOn();
+    return isOn ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE;
+  }
+
+  async setFanActive(value: CharacteristicValue) {
+    const isPoweringOn = value === this.platform.Characteristic.Active.ACTIVE;
+    await this.setOn(isPoweringOn);
+  }
+
+  async getFanSpeed(): Promise<CharacteristicValue> {
+    if (!this.currentState) await this.getCurrentStateFromApi();
+    const speed = this.currentState?.fanSpeedSetting;
+    if (speed === 'HIGH') return 100;
+    if (speed === 'MIDDLE') return 50;
+    if (speed === 'LOW') return 25;
+    return 0;
+  }
+
+  async setFanSpeed(value: CharacteristicValue) {
+    const numValue = value as number;
+    let targetSpeed: 'HIGH' | 'MIDDLE' | 'LOW' = 'LOW';
+    if (numValue > 66) targetSpeed = 'HIGH';
+    else if (numValue > 33) targetSpeed = 'MIDDLE';
+    
+    this.platform.log.debug(`Setting fan speed to ${targetSpeed} (${numValue}%)`);
+    try {
+      await this.platform.electroluxApi.setFanSpeed(targetSpeed);
+    } catch (error) {
+      this.platform.log.error('Failed to set fan speed:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  /**
+   * Mode Control Handlers
+   */
+  async getModeState(mode: 'AUTO' | 'DRY' | 'QUIET'): Promise<CharacteristicValue> {
+    if (!this.currentState) await this.getCurrentStateFromApi();
+    return this.currentState?.mode === mode;
+  }
+
+  async setModeState(mode: 'AUTO' | 'DRY' | 'QUIET', value: CharacteristicValue) {
+    if (value) {
+      this.platform.log.debug(`Setting mode to ${mode}`);
+      try {
+        await this.platform.electroluxApi.setMode(mode);
+        
+        // Ensure other switches appear off in the Home app
+        if (mode !== 'AUTO') this.autoModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+        if (mode !== 'DRY') this.dryModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+        if (mode !== 'QUIET') this.quietModeService.updateCharacteristic(this.platform.Characteristic.On, false);
+      } catch (error) {
+        this.platform.log.error(`Failed to set mode ${mode}:`, error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+    } else {
+      // User tapped the currently active mode to turn it off - we bounce it back to true
+      // since the device must always have an active mode if it is running.
+      this.platform.log.debug(`Ignoring attempt to visually turn off ${mode} mode`);
+      setTimeout(() => {
+        const targetService = mode === 'AUTO' ? this.autoModeService : mode === 'DRY' ? this.dryModeService : this.quietModeService;
+        targetService.updateCharacteristic(this.platform.Characteristic.On, true);
+      }, 100);
+    }
+  }
 }
