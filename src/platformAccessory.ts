@@ -10,12 +10,7 @@ import { ApplianceState } from './electroluxApi.js';
  */
 export class ElectroluxDehumidifierAccessory {
   // Services
-  private switchService: Service;
-  private humiditySensorService: Service;
-  private fanService: Service;
-  private autoModeService: Service;
-  private dryModeService: Service;
-  private quietModeService: Service;
+  private dehumidifierService: Service;
   
   // Keep track of the current state
   private currentState: ApplianceState | null = null;
@@ -40,58 +35,44 @@ export class ElectroluxDehumidifierAccessory {
       }
     }
 
-    // Create a simple switch service for on/off functionality
-    this.switchService = this.accessory.getService(this.platform.Service.Switch) || 
-      this.accessory.addService(this.platform.Service.Switch);
+    // Create Native HumidifierDehumidifier service
+    this.dehumidifierService = this.accessory.getService(this.platform.Service.HumidifierDehumidifier) || 
+      this.accessory.addService(this.platform.Service.HumidifierDehumidifier, 'Dehumidifier');
     
-    // Set the service name
-    this.switchService.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.displayName);
-    
-    // Configure the switch service with on/off functionality
-    this.switchService.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this))
-      .onGet(this.getOn.bind(this));
-      
-    // Create a humidity sensor service
-    this.humiditySensorService = this.accessory.getService(this.platform.Service.HumiditySensor) ||
-      this.accessory.addService(this.platform.Service.HumiditySensor, 'Humidity Sensor', 'humidity');
-      
-    // Set the service name
-    this.humiditySensorService.setCharacteristic(this.platform.Characteristic.Name, 'Humidity');
-    
-    // Configure the humidity sensor service
-    this.humiditySensorService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
-      .onGet(this.getCurrentHumidity.bind(this));
+    this.dehumidifierService.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.displayName);
 
-    // Create a Facev2 service for Fan speed control
-    this.fanService = this.accessory.getService(this.platform.Service.Fanv2) || 
-      this.accessory.addService(this.platform.Service.Fanv2, 'Fan');
-    this.fanService.setCharacteristic(this.platform.Characteristic.Name, 'Fan Speed');
-    this.fanService.getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(this.getFanActive.bind(this))
-      .onSet(this.setFanActive.bind(this));
-    this.fanService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+    // Active (Power)
+    this.dehumidifierService.getCharacteristic(this.platform.Characteristic.Active)
+      .onGet(this.getOn.bind(this))
+      .onSet(this.setOn.bind(this));
+
+    // Target/Current States
+    this.dehumidifierService.getCharacteristic(this.platform.Characteristic.TargetHumidifierDehumidifierState)
+      .setProps({
+        validValues: [
+          this.platform.Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER_OR_DEHUMIDIFIER, // Map to AUTO
+          this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER,                 // Map to DRY
+        ],
+      })
+      .onGet(this.getTargetState.bind(this))
+      .onSet(this.setTargetState.bind(this));
+
+    this.dehumidifierService.getCharacteristic(this.platform.Characteristic.CurrentHumidifierDehumidifierState)
+      .onGet(this.getCurrentState.bind(this));
+
+    // Humidity Sensors
+    this.dehumidifierService.getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
+      .onGet(this.getCurrentHumidity.bind(this));
+      
+    // Force remove the Target Humidity characteristic to get rid of the giant blue slider in iOS
+    const targetHumidityChar = this.dehumidifierService.getCharacteristic(this.platform.Characteristic.RelativeHumidityDehumidifierThreshold);
+    this.dehumidifierService.removeCharacteristic(targetHumidityChar);
+
+    // Rotation Speed for Fan (minStep 33 gives 3 gears)
+    this.dehumidifierService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .setProps({ minValue: 0, maxValue: 100, minStep: 33 })
       .onGet(this.getFanSpeed.bind(this))
       .onSet(this.setFanSpeed.bind(this));
-
-    // Create Switch services for Mode control
-    this.autoModeService = this.accessory.getServiceById(this.platform.Service.Switch, 'AutoMode') || 
-      this.accessory.addService(this.platform.Service.Switch, 'Auto Mode', 'AutoMode');
-    this.autoModeService.getCharacteristic(this.platform.Characteristic.On)
-      .onGet(() => this.getModeState('AUTO'))
-      .onSet((val) => this.setModeState('AUTO', val));
-
-    this.dryModeService = this.accessory.getServiceById(this.platform.Service.Switch, 'DryMode') || 
-      this.accessory.addService(this.platform.Service.Switch, 'Dry Mode', 'DryMode');
-    this.dryModeService.getCharacteristic(this.platform.Characteristic.On)
-      .onGet(() => this.getModeState('DRY'))
-      .onSet((val) => this.setModeState('DRY', val));
-
-    this.quietModeService = this.accessory.getServiceById(this.platform.Service.Switch, 'QuietMode') || 
-      this.accessory.addService(this.platform.Service.Switch, 'Quiet Mode', 'QuietMode');
-    this.quietModeService.getCharacteristic(this.platform.Characteristic.On)
-      .onGet(() => this.getModeState('QUIET'))
-      .onSet((val) => this.setModeState('QUIET', val));
     
     // Set up a method to handle state updates
     this.setupStateUpdateHandler();
@@ -126,40 +107,45 @@ export class ElectroluxDehumidifierAccessory {
       );
     }
     
-    // Update switch service
-    this.platform.log.debug(`Setting switch characteristic to: ${isOn}`);
-    this.switchService.updateCharacteristic(
-      this.platform.Characteristic.On,
-      isOn,
+    // Update Active
+    this.dehumidifierService.updateCharacteristic(
+      this.platform.Characteristic.Active,
+      isOn ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE,
+    );
+
+    // Update Current State
+    // Always return DEHUMIDIFYING when ON to prevent iOS Home App from displaying "關閉" (Closed/Idle) while the switch is ON.
+    this.dehumidifierService.updateCharacteristic(
+      this.platform.Characteristic.CurrentHumidifierDehumidifierState,
+      isOn 
+        ? this.platform.Characteristic.CurrentHumidifierDehumidifierState.DEHUMIDIFYING 
+        : this.platform.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE,
     );
     
-    // Update humidity sensor service
-    this.humiditySensorService.updateCharacteristic(
+    // Update Target State
+    let targetStateResult = this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER;
+    if (this.currentState.mode === 'AUTO') {
+      targetStateResult = this.platform.Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER_OR_DEHUMIDIFIER;
+    }
+    this.dehumidifierService.updateCharacteristic(this.platform.Characteristic.TargetHumidifierDehumidifierState, targetStateResult);
+
+    // Update Humidity
+    this.dehumidifierService.updateCharacteristic(
       this.platform.Characteristic.CurrentRelativeHumidity,
       this.currentState.sensorHumidity,
     );
     
-    // Update fan service
-    this.fanService.updateCharacteristic(
-      this.platform.Characteristic.Active,
-      isOn ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE,
-    );
-    
+    // Update fan service rotation speed
     const speed = this.currentState.fanSpeedSetting;
     let rotationSpeed = 0;
     if (speed === 'HIGH') {
       rotationSpeed = 100;
     } else if (speed === 'MIDDLE') {
-      rotationSpeed = 50;
+      rotationSpeed = 66;
     } else if (speed === 'LOW') {
-      rotationSpeed = 25;
+      rotationSpeed = 33;
     }
-    this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, rotationSpeed);
-
-    // Update mode switches
-    this.autoModeService.updateCharacteristic(this.platform.Characteristic.On, this.currentState.mode === 'AUTO');
-    this.dryModeService.updateCharacteristic(this.platform.Characteristic.On, this.currentState.mode === 'DRY');
-    this.quietModeService.updateCharacteristic(this.platform.Characteristic.On, this.currentState.mode === 'QUIET');
+    this.dehumidifierService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, rotationSpeed);
   }
   
   /**
@@ -176,6 +162,14 @@ export class ElectroluxDehumidifierAccessory {
       );
     }
     
+    // Spoof OFF state during cooldown phase
+    if (this.isShuttingDown) {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('determineDeviceOnState: Device is currently in shutdown cooldown phase, returning OFF');
+      }
+      return false;
+    }
+
     // CASE 1: If applianceState is 'RUNNING', the device is definitely ON
     if (state.applianceState === 'RUNNING') {
       if (this.platform.config.debug) {
@@ -280,10 +274,11 @@ export class ElectroluxDehumidifierAccessory {
    * Handle "SET" requests for the On characteristic
    */
   async setOn(value: CharacteristicValue) {
-    this.platform.log.debug(`setOn: Setting device to ${value ? 'ON' : 'OFF'}`);
+    const isActivating = value === this.platform.Characteristic.Active.ACTIVE || value === true;
+    this.platform.log.debug(`setOn: Setting device to ${isActivating ? 'ON' : 'OFF'}`);
     
     try {
-      if (value) {
+      if (isActivating) {
         // Cancel any pending shutdown
         if (this.shutdownTimer) {
           clearTimeout(this.shutdownTimer);
@@ -393,19 +388,47 @@ export class ElectroluxDehumidifierAccessory {
     }
   }
 
+  async getTargetState(): Promise<CharacteristicValue> {
+    if (!this.currentState) {
+      await this.getCurrentStateFromApi();
+    }
+    return this.currentState?.mode === 'AUTO' 
+      ? this.platform.Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER_OR_DEHUMIDIFIER 
+      : this.platform.Characteristic.TargetHumidifierDehumidifierState.DEHUMIDIFIER;
+  }
+
+  async setTargetState(value: CharacteristicValue) {
+    let mode: 'AUTO' | 'DRY' = 'DRY';
+    if (value === this.platform.Characteristic.TargetHumidifierDehumidifierState.HUMIDIFIER_OR_DEHUMIDIFIER) {
+      mode = 'AUTO';
+    }
+    
+    this.platform.log.debug(`Setting Dehumidifier Target State to ${mode}`);
+    try {
+      await this.platform.electroluxApi.setMode(mode);
+    } catch (error) {
+      this.platform.log.error('Failed to set target state:', error);
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  async getCurrentState(): Promise<CharacteristicValue> {
+    const isOn = await this.getOn() as boolean;
+    if (!isOn) {
+      return this.platform.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
+    }
+    
+    if (!this.currentState) {
+      await this.getCurrentStateFromApi();
+    }
+    
+    // Always return DEHUMIDIFYING when ON to prevent Apple Home from displaying "關閉" 
+    return this.platform.Characteristic.CurrentHumidifierDehumidifierState.DEHUMIDIFYING;
+  }
+
   /**
-   * Fan Mode & Speed Handlers
+   * Fan Speed Handlers
    */
-  async getFanActive(): Promise<CharacteristicValue> {
-    const isOn = await this.getOn();
-    return isOn ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE;
-  }
-
-  async setFanActive(value: CharacteristicValue) {
-    const isPoweringOn = value === this.platform.Characteristic.Active.ACTIVE;
-    await this.setOn(isPoweringOn);
-  }
-
   async getFanSpeed(): Promise<CharacteristicValue> {
     if (!this.currentState) {
       await this.getCurrentStateFromApi();
@@ -415,10 +438,10 @@ export class ElectroluxDehumidifierAccessory {
       return 100;
     }
     if (speed === 'MIDDLE') {
-      return 50;
+      return 66;
     }
     if (speed === 'LOW') {
-      return 25;
+      return 33;
     }
     return 0;
   }
@@ -438,47 +461,6 @@ export class ElectroluxDehumidifierAccessory {
     } catch (error) {
       this.platform.log.error('Failed to set fan speed:', error);
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
-  }
-
-  /**
-   * Mode Control Handlers
-   */
-  async getModeState(mode: 'AUTO' | 'DRY' | 'QUIET'): Promise<CharacteristicValue> {
-    if (!this.currentState) {
-      await this.getCurrentStateFromApi();
-    }
-    return this.currentState?.mode === mode;
-  }
-
-  async setModeState(mode: 'AUTO' | 'DRY' | 'QUIET', value: CharacteristicValue) {
-    if (value) {
-      this.platform.log.debug(`Setting mode to ${mode}`);
-      try {
-        await this.platform.electroluxApi.setMode(mode);
-        
-        // Ensure other switches appear off in the Home app
-        if (mode !== 'AUTO') {
-          this.autoModeService.updateCharacteristic(this.platform.Characteristic.On, false);
-        }
-        if (mode !== 'DRY') {
-          this.dryModeService.updateCharacteristic(this.platform.Characteristic.On, false);
-        }
-        if (mode !== 'QUIET') {
-          this.quietModeService.updateCharacteristic(this.platform.Characteristic.On, false);
-        }
-      } catch (error) {
-        this.platform.log.error(`Failed to set mode ${mode}:`, error);
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-      }
-    } else {
-      // User tapped the currently active mode to turn it off - we bounce it back to true
-      // since the device must always have an active mode if it is running.
-      this.platform.log.debug(`Ignoring attempt to visually turn off ${mode} mode`);
-      setTimeout(() => {
-        const targetService = mode === 'AUTO' ? this.autoModeService : mode === 'DRY' ? this.dryModeService : this.quietModeService;
-        targetService.updateCharacteristic(this.platform.Characteristic.On, true);
-      }, 100);
     }
   }
 }
