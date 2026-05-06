@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.7] - 2026-05-06
+### Fixed
+- Fixed the dehumidifier disappearing from Apple Home after restarting the plugin (while still visible in Homebridge). The accessory now declares the `AIR_DEHUMIDIFIER` HomeKit category for both newly registered and restored-from-cache accessories, so Home knows how to render the tile.
+- Persist the accessory to Homebridge's cache **after** the accessory class has cleaned up stale services, preventing leftover services from being rehydrated on each restart.
+
 ## [1.6.6] - 2026-05-06
 ### Fixed
 - Fixed Apple Home showing the dehumidifier tile as "Not Responding" even though humidity was updating. Characteristic `onGet` handlers no longer await the Electrolux API — they return instantly from cached values, so HomeKit's read deadline can never be missed. Fresh state is delivered via a 30s background poll plus immediate push after `setActive`.

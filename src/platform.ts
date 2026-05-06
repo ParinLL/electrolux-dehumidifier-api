@@ -56,12 +56,19 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
     if (existingAccessory) {
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = deviceInfo;
-      this.api.updatePlatformAccessories([existingAccessory]);
+      existingAccessory.category = this.api.hap.Categories.AIR_DEHUMIDIFIER;
 
       new ElectroluxDehumidifierAccessory(this, existingAccessory);
+      // Persist to disk AFTER the accessory class has cleaned up stale services,
+      // otherwise the cache keeps re-hydrating leftover services on every restart.
+      this.api.updatePlatformAccessories([existingAccessory]);
     } else {
       this.log.info('Adding new accessory:', deviceInfo.displayName);
-      const accessory = new this.api.platformAccessory(deviceInfo.displayName, uuid);
+      const accessory = new this.api.platformAccessory(
+        deviceInfo.displayName,
+        uuid,
+        this.api.hap.Categories.AIR_DEHUMIDIFIER,
+      );
       accessory.context.device = deviceInfo;
 
       new ElectroluxDehumidifierAccessory(this, accessory);
