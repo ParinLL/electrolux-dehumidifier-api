@@ -1,6 +1,27 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [1.6.6] - 2026-05-06
+### Fixed
+- Fixed Apple Home showing the dehumidifier tile as "Not Responding" even though humidity was updating. Characteristic `onGet` handlers no longer await the Electrolux API — they return instantly from cached values, so HomeKit's read deadline can never be missed. Fresh state is delivered via a 30s background poll plus immediate push after `setActive`.
+- Background poll timer is now `unref()`-ed so it can't keep the Homebridge process alive during shutdown.
+
+## [1.6.5] - 2026-05-06
+### Fixed
+- Fixed "Accessory Not Responding" in Apple Home after every Homebridge restart. The previous startup code removed and re-added the HumidifierDehumidifier service each time, giving its characteristics brand-new IIDs that no longer matched the ones the Home app had cached. The service is now reused across restarts, and only leftover services from older plugin versions (Fan, mode switches) are removed.
+- Stopped churning `RelativeHumidityDehumidifierThreshold` / `RotationSpeed` characteristics on every boot; they're only removed when actually present.
+
+## [1.6.4] - 2026-05-06
+### Fixed
+- Fixed "Accessory Not Responding" appearing in Apple Home while Homebridge itself showed everything as healthy.
+  - Loaded the accessory class synchronously so characteristic handlers are wired up before the HAP bridge publishes.
+  - Added an 8s axios timeout so a hung Electrolux API call can no longer stall HomeKit past its deadline.
+  - Added a 3s state cache with in-flight request dedupe so HomeKit's parallel reads hit the API only once.
+  - Background polling every 60s pushes fresh values to HomeKit so a single failed on-demand read no longer trips "Not Responding".
+  - On-demand reads now degrade to the last known value instead of throwing `SERVICE_COMMUNICATION_FAILURE`.
+  - Sanitized humidity readings so malformed API responses (NaN / out of 0–100) don't poison the characteristic.
+
 ## [1.5.4] - 2026-04-23
 ### Fixed
 - Fixed a bug where toggling the device OFF in the Home app would cause it to visually bounce back to the ON state. Background polling overrides are now properly skipping state overrides during the 20-minute shutdown sequence.

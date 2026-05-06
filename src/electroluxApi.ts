@@ -38,6 +38,14 @@ export class ElectroluxApi {
   private axiosInstance: AxiosInstance;
   private tokenCache: TokenCache;
   private readonly MIN_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+  // Serialize concurrent refresh requests so rotating refresh tokens aren't used more than once.
+  private refreshPromise: Promise<void> | null = null;
+
+  // Short-lived cache + in-flight dedupe for getApplianceState so HomeKit's
+  // three parallel characteristic reads don't each trigger an API call.
+  private stateCache: { state: ApplianceState; at: number } | null = null;
+  private stateInFlight: Promise<ApplianceState> | null = null;
+  private static readonly STATE_CACHE_MS = 3_000;
 
   constructor(
     private readonly config: ElectroluxConfig,
@@ -45,6 +53,10 @@ export class ElectroluxApi {
   ) {
     this.axiosInstance = axios.create({
       headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
+      // HomeKit characteristic handlers have a short deadline before the Home app
+      // marks the accessory as "Not Responding". Fail fast so we can surface errors
+      // to HomeKit rather than hanging the whole request pipeline.
+      timeout: 8000,
     });
 
     this.tokenCache = new TokenCache(this.config.applianceId, this.log, this.config.storagePath);
@@ -73,6 +85,21 @@ export class ElectroluxApi {
       return;
     }
 
+    // If a refresh is already in progress, wait for it instead of starting a second one.
+    // Electrolux rotates the refresh token on every use, so concurrent refreshes will fail.
+    if (this.refreshPromise) {
+      this.log.debug('Token refresh already in progress, awaiting existing request');
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.doRefreshToken().finally(() => {
+      this.refreshPromise = null;
+    });
+
+    return this.refreshPromise;
+  }
+
+  private async doRefreshToken(): Promise<void> {
     try {
       this.log.debug('Refreshing access token');
       const response = await this.axiosInstance.post<TokenResponse>(
@@ -104,7 +131,26 @@ export class ElectroluxApi {
     }
   }
 
-  async getApplianceState(): Promise<ApplianceState> {
+  async getApplianceState(forceFresh = false): Promise<ApplianceState> {
+    if (!forceFresh && this.stateCache && Date.now() - this.stateCache.at < ElectroluxApi.STATE_CACHE_MS) {
+      return this.stateCache.state;
+    }
+
+    if (this.stateInFlight) {
+      return this.stateInFlight;
+    }
+
+    this.stateInFlight = this.fetchApplianceState().finally(() => {
+      this.stateInFlight = null;
+    });
+    return this.stateInFlight;
+  }
+
+  invalidateStateCache(): void {
+    this.stateCache = null;
+  }
+
+  private async fetchApplianceState(): Promise<ApplianceState> {
     await this.ensureValidToken();
 
     try {
@@ -117,11 +163,13 @@ export class ElectroluxApi {
       });
 
       const props = response.data.properties.reported;
-      return {
+      const state: ApplianceState = {
         sensorHumidity: props.sensorHumidity,
         applianceState: props.applianceState,
         mode: props.mode,
       };
+      this.stateCache = { state, at: Date.now() };
+      return state;
     } catch (error) {
       this.log.error('Failed to get appliance state:', error instanceof Error ? error.message : String(error));
       throw new Error('Failed to get appliance state');
@@ -155,6 +203,8 @@ export class ElectroluxApi {
           'Authorization': `Bearer ${this.accessToken}`,
         },
       });
+      // Device state has changed; drop the cache so the next read hits the API.
+      this.invalidateStateCache();
       this.log.debug('Command sent:', JSON.stringify(command));
     } catch (error) {
       this.log.error('Failed to send command:', error instanceof Error ? error.message : String(error));

@@ -2,6 +2,7 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAcces
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { ElectroluxApi } from './electroluxApi.js';
+import { ElectroluxDehumidifierAccessory } from './platformAccessory.js';
 
 export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
@@ -57,18 +58,14 @@ export class ElectroluxDehumidifierPlatform implements DynamicPlatformPlugin {
       existingAccessory.context.device = deviceInfo;
       this.api.updatePlatformAccessories([existingAccessory]);
 
-      import('./platformAccessory.js').then(({ ElectroluxDehumidifierAccessory }) => {
-        new ElectroluxDehumidifierAccessory(this, existingAccessory);
-      });
+      new ElectroluxDehumidifierAccessory(this, existingAccessory);
     } else {
       this.log.info('Adding new accessory:', deviceInfo.displayName);
       const accessory = new this.api.platformAccessory(deviceInfo.displayName, uuid);
       accessory.context.device = deviceInfo;
 
-      import('./platformAccessory.js').then(({ ElectroluxDehumidifierAccessory }) => {
-        new ElectroluxDehumidifierAccessory(this, accessory);
-        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      });
+      new ElectroluxDehumidifierAccessory(this, accessory);
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     }
 
     this.discoveredCacheUUIDs.push(uuid);
